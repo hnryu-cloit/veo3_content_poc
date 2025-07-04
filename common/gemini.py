@@ -7,6 +7,9 @@ import time
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from PIL import Image
+from io import BytesIO
+import base64
 
 from common.logger import timefn
 from common.logger import init_logger
@@ -104,3 +107,14 @@ class Gemini:
         )
         return response
 
+    @timefn
+    def _call_imagen_text(self, prompt):
+        response = self.client.models.generate_images(
+            model='imagen-4.0-generate-preview-06-06',
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+            )
+        )
+        image = Image.open(BytesIO(response.generated_images[0].image.image_bytes))
+        return image

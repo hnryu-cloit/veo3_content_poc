@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QPixmap, QTextDocument
 from PIL import Image
 
+from common.gemini import Gemini
 
 class ImageGenerationThread(QThread):
     scene_completed = pyqtSignal(int, object, str)
@@ -20,7 +21,6 @@ class ImageGenerationThread(QThread):
         super().__init__()
         self.scenes = scenes
         self.temp_folder = './temp'
-        self.api_key = api_key
 
         os.makedirs(self.temp_folder, exist_ok=True)
 
@@ -42,7 +42,8 @@ class ImageGenerationThread(QThread):
         prompt = self.create_scene_image_prompt(scene)
         try:
             # 임시로 더미 이미지 생성 (실제로는 Imagen4 API 호출)
-            dummy_image = Image.new('RGB', (512, 512), color='lightgray')
+            # dummy_image = Image.new('RGB', (512, 512), color='lightgray')
+            dummy_image = self.gemini._call_imagen_text(prompt)
             temp_path = os.path.join(self.temp_folder, f"scene_{scene_number}.png")
             dummy_image.save(temp_path, 'PNG')
             return temp_path
@@ -254,6 +255,7 @@ class WordWrapDelegate(QStyledItemDelegate):
         # 높이 계산 (최소 30, 최대 150)
         height = max(30, min(150, int(doc.size().height()) + 10))
         return option.rect.adjusted(0, 0, 0, height - option.rect.height()).size()
+
 
 class StoryboardDialog(QDialog):
     """스토리보드 결과를 표시하는 다이얼로그"""
@@ -913,3 +915,45 @@ class StoryboardDialog(QDialog):
                 color: #666666;
             }}
         """
+
+
+if __name__ == "__main__":
+
+   ### imagen4 테스트
+    import json
+    import glob
+    import os
+    from common.gemini import Gemini
+
+    gemini = Gemini()
+    json_file = glob.glob('./output/**/*.json')[0] ## json_path 직접 입력
+    with open(json_file, 'r') as f:
+        json_file = json.load(f)
+
+    # Create temp folder if it doesn't exist
+    temp_folder = './temp'
+    os.makedirs(temp_folder, exist_ok=True)
+
+    # Generate 8 scenes
+    scenario = json_file['scenes']
+    for data in scenario:
+        prompt = f"""
+        아래의 정보는 스토리보드의 주요 씬(장면)에 대한 내용이야. 해당 내용 참고하여 스토리보드 스케치 이미지 만들어줘
+            **시각적 묘사**: {data['visual']},
+            **음향 효과**: {data['audio']},
+            **자막 또는 나레이션**: {data['text']},
+            **장면 묘사** : {data['description']}
+        """
+        try:
+            sketch_image = gemini._call_imagen_text(prompt)
+            temp_path = os.path.join(temp_folder, f"scene_{data['scene_number']}.png")
+
+            # Display and save image
+            sketch_image.show()
+            sketch_image.save(temp_path, 'PNG')
+
+            print(f"Scene {data['scene_number']} saved to {temp_path}")
+
+        except Exception as e:
+            print(f"Error generating scene {data['scene_number']}: {e}")
+            continue
