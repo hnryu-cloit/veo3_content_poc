@@ -5,6 +5,8 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from PIL import Image
 from common.gemini import Gemini
 
+from google.genai.types import Part
+
 class ImageGenerationThread(QThread):
     scene_completed = pyqtSignal(int, object, str)
     generation_completed = pyqtSignal()
@@ -269,6 +271,56 @@ class ImageUpload:
             return None, copy_message
 
         return temp_path, copy_message
+
+
+class ValidationTextGenerator():
+    """각 씬에 대한 이미지로부터 검증용 줄거리 생성"""
+    def __init__(self, scenes):
+        super().__init__()
+        self.prompt = None
+        self.scenes = scenes
+        self.gemini = Gemini()
+        self.temp_folder = './temp_save' # temp
+
+
+    def run(self):
+        image_files = []
+
+        for f_name in os.listdir(self.temp_folder):
+            if f_name.startswith('scene_'):
+                try:
+                    # 파일명에서 숫자 부분 추출 (예: _1.png -> 1)
+                    suffix_part = f_name.split('_')[-1].split('.')[0]
+                    image_number = int(suffix_part)
+                    image_files.append((image_number, os.path.join(self.temp_folder, f_name)))
+                except ValueError:
+                    continue  # 숫자가 아닌 경우 건너뛰기
+
+        # 파일명 접미사 번호순으로 정렬
+        image_files.sort(key=lambda x: x[0])
+        if len(image_files) != 8:
+            print(f"경고: '{self.temp_folder}' 폴더에 8개의 이미지가 발견되지 않았습니다. 현재 {len(image_files)}개.")
+            if len(image_files) == 0:
+                print("이미지 파일을 찾을 수 없습니다. 파일명과 경로를 확인해주세요.")
+
+
+        # 로컬에 저장된 이미지 bytes 형식으로 변환하기
+        contents = []
+        for image_file in image_files:
+            with open(image_file[-1], 'rb') as f:
+                img_bytes  = f.read()
+                contents.append(Part.from_bytes(data=img_bytes, mime_type="image/png"))
+
+        prompt = "이 8개의 씬 이미지는 하나의 이야기를 구성합니다. 각 이미지의 순서에 따라 전체적인 줄거리를 2~3줄 분량으로 작성해 주세요."
+
+        contents.insert(0,prompt)
+
+        try:
+            response = self.gemini._call_gemini_multimodal(contents)
+            return response.text
+        except Exception as e:
+            raise Exception(f"Gemini API call failed: {e}")
+
 
 
 if __name__ == "__main__":

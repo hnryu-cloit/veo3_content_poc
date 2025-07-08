@@ -118,3 +118,14 @@ class Gemini:
         )
         image = Image.open(BytesIO(response.generated_images[0].image.image_bytes))
         return image
+
+    @timefn
+    def _call_gemini_multimodal(self, contents, model=None):
+        response = self.client.models.generate_content(
+            model=model if model else self.model,
+            contents=contents,
+            config={
+                "response_mime_type": "application/json"
+            }
+        )
+        return response.text
