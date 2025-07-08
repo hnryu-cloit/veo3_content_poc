@@ -7,61 +7,9 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit,
                              QMessageBox, QStackedWidget, QStyledItemDelegate,
                              QGroupBox, QInputDialog, QTableWidget,
                              QTableWidgetItem, QHeaderView)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap, QTextDocument
-from PIL import Image
-
-from common.gemini import Gemini
-
-class ImageGenerationThread(QThread):
-    scene_completed = pyqtSignal(int, object, str)
-    generation_completed = pyqtSignal()
-
-    def __init__(self, scenes, api_key=None):
-        super().__init__()
-        self.scenes = scenes
-        self.temp_folder = './temp'
-
-        os.makedirs(self.temp_folder, exist_ok=True)
-
-    def run(self):
-        """각 씬에 대해 이미지 생성"""
-        for i, scene in enumerate(self.scenes):
-            try:
-                image_obj = self.generate_scene_image(scene, i + 1)
-                self.scene_completed.emit(i + 1, image_obj, "")
-            except Exception as e:
-                self.scene_completed.emit(i + 1, None, str(e))
-            finally:
-                import gc
-                gc.collect()  # 각 씬 처리 후 메모리 정리
-        self.generation_completed.emit()
-
-    def generate_scene_image(self, scene, scene_number):
-        """실제 이미지 생성 함수 (Imagen4 API 사용)"""
-        prompt = self.create_scene_image_prompt(scene)
-        try:
-            # 임시로 더미 이미지 생성 (실제로는 Imagen4 API 호출)
-            # dummy_image = Image.new('RGB', (512, 512), color='lightgray')
-            dummy_image = self.gemini._call_imagen_text(prompt)
-            temp_path = os.path.join(self.temp_folder, f"scene_{scene_number}.png")
-            dummy_image.save(temp_path, 'PNG')
-            return temp_path
-        finally:
-            import gc
-            gc.collect()
-
-    def create_scene_image_prompt(self, scene):
-        prompt_parts = []
-
-        if 'visual' in scene:
-            prompt_parts.append(f"Visual: {scene['visual']}")
-        if 'description' in scene:
-            prompt_parts.append(f"Description: {scene['description']}")
-        if 'mood' in scene:
-            prompt_parts.append(f"Mood: {scene['mood']}")
-
-        return " | ".join(prompt_parts)
+from conti import ImageGenerationThread, ImageUpload, ImageRegenerationThread
 
 
 class SceneEditWidget(QWidget):
@@ -262,10 +210,17 @@ class StoryboardDialog(QDialog):
 
     def __init__(self, storyboard_data, parent=None):
         super().__init__(parent)
+
+        self.is_generating = False
+        self.loading_widget = None
         self.storyboard_data = storyboard_data
         self.selected_storyboard = None
         self.edited_scenes = []
         self.generated_images = {}
+        self.image_generation_thread = None
+        self.regeneration_threads = {}
+
+        self.scene_buttons = {}  # {scene_number: {'upload': button, 'regenerate': button}}
 
         # 기본 output 폴더 설정
         self.output_folder = './output'
@@ -477,6 +432,10 @@ class StoryboardDialog(QDialog):
         generation_widget = QWidget()
         layout = QVBoxLayout()
 
+        # 로딩 상태 위젯 생성
+        self.loading_widget = self.create_loading_widget()
+        layout.addWidget(self.loading_widget)
+
         # 결과 표시 영역
         self.result_scroll = QScrollArea()
         self.result_widget = QWidget()
@@ -493,7 +452,8 @@ class StoryboardDialog(QDialog):
         layout.addWidget(self.result_scroll)
 
         # 하단 버튼들
-        button_layout = QHBoxLayout()
+        self.button_container = QWidget()
+        button_layout = QHBoxLayout(self.button_container)
 
         back_edit_button = QPushButton('이전 화면으로')
         back_edit_button.clicked.connect(self.go_back_to_edit)
@@ -521,6 +481,62 @@ class StoryboardDialog(QDialog):
         layout.addLayout(button_layout)
         generation_widget.setLayout(layout)
         self.stacked_widget.addWidget(generation_widget)
+
+    def create_loading_widget(self):
+        """로딩 상태 위젯 생성"""
+        loading_widget = QWidget()
+        loading_layout = QVBoxLayout(loading_widget)
+
+        # 로딩 메시지
+        loading_label = QLabel('이미지를 생성하고 있습니다...')
+        loading_label.setAlignment(Qt.AlignCenter)
+        loading_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #003366;
+                padding: 20px;
+                background-color: #afb5ca;
+                border-radius: 1px;
+                margin:10px;
+            }
+        """)
+        loading_layout.addWidget(loading_label)
+
+        # 진행 상태 표시
+        self.progress_label = QLabel('0개 Scene Success!!!')
+        self.progress_label.setAlignment(Qt.AlignCenter)
+        self.progress_label.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                font-weight: bold;
+                color: #003373;
+                padding: 10px;
+                margin: 10px;
+            }
+        """)
+        loading_layout.addWidget(self.progress_label)
+        loading_layout.addStretch()
+
+        loading_widget.hide()
+        return loading_widget
+
+    def show_loading_state(self):
+        """로딩 상태 표시"""
+        self.loading_widget.show()
+        self.result_scroll.hide()
+        self.button_container.hide()
+
+        # 진행 상태 초기화
+        self.completed_scenes = 0
+        total_scenes = len(self.edited_scenes)
+        self.progress_label.setText(f'0 / {total_scenes}개 Scene Success!!!')
+
+    def hide_loading_state(self):
+        """로딩 상태 숨기기"""
+        self.loading_widget.hide()
+        self.result_scroll.show()
+        self.button_container.show()
 
     def select_storyboard(self, storyboard_key):
         """스토리보드 선택 및 편집 페이지로 이동"""
@@ -578,6 +594,22 @@ class StoryboardDialog(QDialog):
 
     def go_back_to_edit(self):
         """편집 페이지로 돌아가기"""
+        # 생성 중이면 경고 메시지 표시
+        if self.is_generating:
+            reply = QMessageBox.question(
+                self,
+                '생성 중단 확인',
+                '이미지 생성이 진행 중입니다.\n정말로 중단하고 이전 화면으로 돌아가시겠습니까?\n\n생성된 이미지는 모두 삭제됩니다.',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.No:
+                return
+
+            # 스레드 중단
+            self.stop_image_generation()
+
         self.stacked_widget.setCurrentIndex(1)
 
     def start_image_generation(self):
@@ -590,16 +622,57 @@ class StoryboardDialog(QDialog):
         # 이미지 생성 페이지로 이동
         self.stacked_widget.setCurrentIndex(2)
 
+        # 이미지 생성 상태값
+        self.is_generating = True
+        self.show_loading_state()
+
         # 이미지 생성 스레드 시작
         self.image_thread = ImageGenerationThread(self.edited_scenes)
         self.image_thread.scene_completed.connect(self.on_scene_completed)
         self.image_thread.generation_completed.connect(self.on_generation_completed)
         self.image_thread.start()
 
+    def stop_image_generation(self):
+        """이미지 생성 중단"""
+        if hasattr(self, 'image_generation_thread') and self.image_generation_thread:
+            if self.image_generation_thread.isRunning():
+                self.image_generation_thread.quit()
+                self.image_generation_thread.wait(3000)  # 3초 대기
+
+                if self.image_generation_thread.isRunning():
+                    self.image_generation_thread.terminate()
+                    self.image_generation_thread.wait()
+
+        # 상태 초기화
+        self.is_generating = False
+        self.generated_images.clear()
+
+        # 임시 파일 정리
+        temp_folder = './temp'
+        if os.path.exists(temp_folder):
+            try:
+                import shutil
+                shutil.rmtree(temp_folder)
+                os.makedirs(temp_folder, exist_ok=True)
+            except Exception as e:
+                print(f"임시 파일 정리 중 오류: {e}")
+
     def on_generation_completed(self):
         """모든 이미지 생성 완료"""
+        self.is_generating = False
+        self.hide_loading_state()
+
         # 결과 표시
         self.display_final_results()
+
+    def set_scene_buttons_enabled(self, scene_number, enabled):
+        """특정 씬의 버튼들 활성화/비활성화"""
+        if scene_number in self.scene_buttons:
+            buttons = self.scene_buttons[scene_number]
+            if 'upload' in buttons:
+                buttons['upload'].setEnabled(enabled)
+            if 'regenerate' in buttons:
+                buttons['regenerate'].setEnabled(enabled)
 
     def display_final_results(self):
         """최종 결과 표시"""
@@ -607,6 +680,9 @@ class StoryboardDialog(QDialog):
             widget = self.result_layout.itemAt(i).widget()
             if widget:
                 widget.deleteLater()
+
+        # 씬별 버튼 참조 초기화
+        self.scene_buttons.clear()
 
         for i, scene in enumerate(self.edited_scenes):
             scene_number = i + 1
@@ -621,6 +697,9 @@ class StoryboardDialog(QDialog):
                 }
             """)
             scene_layout = QVBoxLayout(scene_container)
+
+            # 씬 제목과 버튼들
+            title_button_layout = QHBoxLayout()
             title_label = QLabel(f"#{scene_number}: ({scene.get('duration', '')})")
             title_label.setStyleSheet("""
                 QLabel {
@@ -633,13 +712,110 @@ class StoryboardDialog(QDialog):
                     margin-bottom: 5px;
                 }
             """)
-            title_label.setAlignment(Qt.AlignCenter)
-            scene_layout.addWidget(title_label)
+            title_button_layout.addWidget(title_label)
+            title_button_layout.addStretch()
+
+            # 이미지 업로드 버튼
+            upload_button = QPushButton('이미지 업로드')
+            upload_button.setStyleSheet(self.get_button_style('#b0c4de'))
+            upload_button.clicked.connect(lambda checked, sn=scene_number: self.upload_scene_image(sn))
+            title_button_layout.addWidget(upload_button)
+
+            # AI 이미지 생성 버튼
+            regenerate_button = QPushButton('AI 이미지 생성')
+            regenerate_button.setStyleSheet(self.get_button_style('#d8bfd8'))
+            regenerate_button.clicked.connect(
+                lambda checked, scene_data=scene, sn=scene_number: self.regenerate_scene_image(scene_data, sn))
+            title_button_layout.addWidget(regenerate_button)
+
+            scene_layout.addLayout(title_button_layout)
+
+            # 이미지 위젯
             image_widget = self.create_image_widget(scene_number)
             scene_layout.addWidget(image_widget)
+
+            # 씬 정보 테이블
             info_table = self.create_scene_info_table(scene)
             scene_layout.addWidget(info_table)
+
             self.result_layout.addWidget(scene_container)
+
+    def upload_scene_image(self, scene_number):
+        """씬 이미지 업로드"""
+        try:
+            file_path, message = ImageUpload.upload_image(parent=self, scene_number=scene_number)
+
+            if file_path:
+                # 성공적으로 업로드된 경우
+                self.generated_images[scene_number] = file_path
+                QMessageBox.information(self, '업로드 성공', message)
+
+                # 화면 새로고침
+                self.display_final_results()
+            else:
+                # 업로드 실패 또는 취소된 경우
+                if message != "파일이 선택되지 않았습니다.":
+                    QMessageBox.warning(self, '업로드 실패', message)
+
+                # 버튼 다시 활성화
+                self.set_scene_buttons_enabled(scene_number, True)
+
+        except Exception as e:
+            QMessageBox.critical(self, '오류', f'이미지 업로드 중 오류가 발생했습니다: {str(e)}')
+            # 오류 발생 시에도 버튼 다시 활성화
+            self.set_scene_buttons_enabled(scene_number, True)
+
+    def regenerate_scene_image(self, scene_data, scene_number):
+        """씬 이미지 재생성"""
+        try:
+            # 재생성 중 버튼 비활성화
+            self.set_scene_buttons_enabled(scene_number, False)
+
+            regen_thread = ImageRegenerationThread.regenerate_image(
+                scene_data, scene_number, parent=self
+            )
+
+            if regen_thread:
+                # 재생성 스레드 연결 및 시작
+                regen_thread.regeneration_completed.connect(
+                    lambda sn, img_path, error: self.on_regeneration_completed(sn, img_path, error)
+                )
+
+                # 기존 재생성 스레드가 있다면 정리
+                if scene_number in self.regeneration_threads:
+                    old_thread = self.regeneration_threads[scene_number]
+                    if old_thread.isRunning():
+                        old_thread.quit()
+                        old_thread.wait()
+
+                self.regeneration_threads[scene_number] = regen_thread
+                regen_thread.start()
+
+                # 진행 상태 표시
+                QMessageBox.information(self, '재생성 시작', f'씬 #{scene_number} 이미지를 재생성하고 있습니다...')
+            else:
+                # 스레드 생성 실패 시 버튼 다시 활성화
+                self.set_scene_buttons_enabled(scene_number, True)
+
+        except Exception as e:
+            QMessageBox.critical(self, '오류', f'이미지 재생성 중 오류가 발생했습니다: {str(e)}')
+            # 오류 발생 시에도 버튼 다시 활성화
+            self.set_scene_buttons_enabled(scene_number, True)
+
+    def on_regeneration_completed(self, scene_number, image_path, error_message):
+        """이미지 재생성 완료 처리"""
+        if error_message:
+            QMessageBox.critical(self, '재생성 실패', f'씬 #{scene_number} 이미지 재생성에 실패했습니다:\n{error_message}')
+        else:
+            self.generated_images[scene_number] = image_path
+            QMessageBox.information(self, '재생성 완료', f'씬 #{scene_number} 이미지가 성공적으로 재생성되었습니다.')
+
+            # 화면 새로고침
+            self.display_final_results()
+
+        # 완료된 스레드 정리
+        if scene_number in self.regeneration_threads:
+            del self.regeneration_threads[scene_number]
 
     def create_image_widget(self, scene_number):
         """이미지 위젯 생성"""
@@ -671,7 +847,7 @@ class StoryboardDialog(QDialog):
             else:
                 image_label.setText("이미지 파일 없음")
         else:
-            image_label.setText("이미지 없음")
+            image_label.setText("이미지를 생성하거나 업로드해주세요")
 
         image_layout.addWidget(image_label, alignment=Qt.AlignCenter)
         return image_container
@@ -681,6 +857,37 @@ class StoryboardDialog(QDialog):
             self.generated_images[scene_number] = {'error': error_message}
         else:
             self.generated_images[scene_number] = file_path
+
+        self.completed_scenes += 1
+        total_scenes = len(self.edited_scenes)
+        self.progress_label.setText(f'{self.completed_scenes} / {total_scenes}개 Scene Success!!!')
+
+    def closeEvent(self, event):
+        """다이얼로그 종료 시 스레드 정리"""
+        # 생성 중이면 확인 메시지
+        if self.is_generating:
+            reply = QMessageBox.question(
+                self,
+                '프로그램 종료',
+                '이미지 생성이 진행 중입니다.\n정말로 프로그램을 종료하시겠습니까?\n\n생성 중인 작업이 모두 취소됩니다.',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
+
+        # 모든 스레드 정리
+        self.stop_image_generation()
+
+        # 재생성 스레드들 정리
+        for thread in self.regeneration_threads.values():
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+
+        event.accept()
 
     def create_scene_info_table(self, scene):
         """씬 정보 테이블 생성"""
@@ -919,14 +1126,14 @@ class StoryboardDialog(QDialog):
 
 if __name__ == "__main__":
 
-   ### imagen4 테스트
+    ### imagen4 테스트
     import json
     import glob
     import os
     from common.gemini import Gemini
 
     gemini = Gemini()
-    json_file = glob.glob('./output/**/*.json')[0] ## json_path 직접 입력
+    json_file = glob.glob('./output/**/*.json')[0]  ## json_path 직접 입력
     with open(json_file, 'r') as f:
         json_file = json.load(f)
 
