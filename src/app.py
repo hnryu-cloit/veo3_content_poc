@@ -56,47 +56,65 @@ class ApiThread(QThread):
                 prompt += f"{i}. {file_info['파일설명']}: {file_info['파일명']}\n"
 
         prompt += """
-        위의 정보를 바탕으로 다음 형식의 JSON으로 광고 storyboard1~3 각 storyboard는 #1~#8 스토리보드를 생성해주세요:
-        {
-          "storyboard1": {
-            "title": "광고 제목",
-            "total duration": "전체 광고 길이",
-            "scenes": [
-              {
-                "scene_number": 1,
-                "duration": "씬 길이",
-                "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
-                "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
-                "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
-                "description": "씬의 설명"
-              },
-              {
-                "scene_number": 2,
-                "duration": "씬 길이",
-                "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
-                "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
-                "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
-                "description": "씬의 설명"
-              },
-              ....,
-              {
-                "scene_number": 8,
-                "duration": "씬 길이",
-                "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
-                "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
-                "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
-                "description": "씬의 설명"
-              },
-            ],
-            "key_messages": ["핵심 메시지 1", "핵심 메시지 2"],
-            "call_to_action": "행동 유도 문구"
-          }
-          "storyboard2": {},
-          "storyboard3": {},
-        }
-        
-        JSON 형식으로만 응답해주세요.
+            ## Role
+            - 당신은 제품 속성과 타겟 고객 을 바탕으로 광고를 기획하는 광고 기획 전문가입니다.
+    
+    
+            ## Objective
+            - 최종 목표는 하나의 storyboard 내에서 각 8개의 Scene에 대해 이미지를 생성하고 해당 이미지를 기반으로 영상을 만드는 것입니다.
+            - 여기서는 각 Scene에 대한 이미지 생성을 위해 storyboard를 작성합니다.
+    
+    
+            ## Context
+            - 생성된 광고는 입력 받은 '타겟 고객'을 대상으로 제품에 보여질 예정입니다.
+            - 입력받은 제품의 속성을 기반으로 광고에 사용될 storyboard 3개, 각 storyboard 내 scene은 8개를 생성합니다.
+            - 각 scene의 길이는 1초, storyboard의 길이는 8초임을 감안하고 스토리보트를 생성합니다.
+            - '타겟 고객' 성향을 고려하며 '톤 앤 매너'를 유지하며 스토리보드를 작성해주세요.
+            **storyboard의 각 scene의 내용이 줄거리와 톤앤매너에 상응하도록 작성해주세요.**
+    
+    
+            ## Example/Guideline
+            **출력은 다음 형식의 JSON입니다.**
+            {
+              "storyboard1": {
+                "title": "광고 제목",
+                "total duration": "전체 광고 길이",
+                "plot": "핵심소재, 타겟고객을 겨냥한 2~3줄에 대해 설명하는 줄거리",
+                "scenes": [
+                  {
+                    "scene_number": 1,
+                    "duration": "씬 길이",
+                    "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
+                    "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
+                    "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
+                    "description": "씬의 설명"
+                  },
+                  {
+                    "scene_number": 2,
+                    "duration": "씬 길이",
+                    "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
+                    "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
+                    "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
+                    "description": "씬의 설명"
+                  },
+                  ....,
+                  {
+                    "scene_number": 8,
+                    "duration": "씬 길이",
+                    "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
+                    "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
+                    "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
+                    "description": "씬의 설명"
+                  },
+                ],
+                "key_messages": ["핵심 메시지 1", "핵심 메시지 2"],
+                "call_to_action": "행동 유도 문구"
+              }
+              "storyboard2": {},
+              "storyboard3": {},
+            }
         """
+
         return prompt
 
 
