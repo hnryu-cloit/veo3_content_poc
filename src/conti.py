@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from PIL import Image
 from common.gemini import Gemini
 
-from google.genai.types import Part
+
 
 class ImageGenerationThread(QThread):
     scene_completed = pyqtSignal(int, object, str)
@@ -103,7 +103,15 @@ class ImageRegenerationThread(QThread):
             if os.path.exists(existing_file):
                 os.remove(existing_file)
 
-            # 새 이미지 생성
+            # # 개선된 프롬프트 사용
+            # if 'improved_description' in self.scene_data:
+            #     prompt = self.create_improved_prompt(self.scene_data)
+            #     generated_image = self.gemini._call_imagen_text(prompt)
+            #
+            #     new_image_path = os.path.join(self.temp_folder, f"scene_{self.scene_number}.png")
+            #     generated_image.save(new_image_path, 'PNG')
+            #
+            # else:
             new_image_path = self.regenerate_scene_image()
             self.regeneration_completed.emit(self.scene_number, new_image_path, "")
 
@@ -160,6 +168,30 @@ class ImageRegenerationThread(QThread):
 
         return full_prompt
 
+    def create_improved_prompt(self, scene_data):
+
+        base_prompt = scene_data.get('improved_description', '')
+
+        original_info = f"""
+            원본 씬 정보 참고:
+            - 화면 내용: {scene_data.get('visual', '')}
+            - 분위기: {scene_data.get('mood', '')}
+            - 씬 설명: {scene_data.get('description', '')}
+        """
+
+        # 광고 스토리보드 스타일 가이드 추가
+        style_guide = """
+        스타일 가이드:
+        - 광고용 고품질 이미지
+        - 선명하고 전문적인 구성
+        - 브랜드 이미지에 적합한 톤
+        - 시각적 임팩트가 강한 구도
+        """
+        prompt = f"{base_prompt}\n\n{original_info}\n\n{style_guide}"
+
+        return prompt
+
+
     @staticmethod
     def regenerate_image(scene_data, scene_number, parent=None):
         """이미지 재생성 시작 (정적 메서드)"""
@@ -168,7 +200,7 @@ class ImageRegenerationThread(QThread):
         reply = QMessageBox.question(
             parent,
             '이미지 재생성',
-            f'씬 #{scene_number}의 이미지를 다시 생성하시겠습니까?\n기존 이미지는 덮어씌워집니다.',
+            f'Scene #{scene_number}의 이미지를 다시 생성하시겠습니까?\n기존 이미지는 덮어씌워집니다.',
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -244,7 +276,7 @@ class ImageUpload:
                     img.save(png_path, 'PNG')
 
                 # 원본 파일 삭제
-                os.remove(temp_file_path)
+                # os.remove(temp_file_path)
                 temp_file_path = png_path
 
             return temp_file_path, "이미지가 성공적으로 업로드되었습니다."
@@ -273,66 +305,5 @@ class ImageUpload:
         return temp_path, copy_message
 
 
-class ValidationTextGenerator():
-    """각 씬에 대한 이미지로부터 검증용 줄거리 생성"""
-    def __init__(self, scenes):
-        super().__init__()
-        self.prompt = None
-        self.scenes = scenes
-        self.gemini = Gemini()
-        self.temp_folder = './temp_save' # temp
 
 
-    def run(self):
-        image_files = []
-
-        for f_name in os.listdir(self.temp_folder):
-            if f_name.startswith('scene_'):
-                try:
-                    # 파일명에서 숫자 부분 추출 (예: _1.png -> 1)
-                    suffix_part = f_name.split('_')[-1].split('.')[0]
-                    image_number = int(suffix_part)
-                    image_files.append((image_number, os.path.join(self.temp_folder, f_name)))
-                except ValueError:
-                    continue  # 숫자가 아닌 경우 건너뛰기
-
-        # 파일명 접미사 번호순으로 정렬
-        image_files.sort(key=lambda x: x[0])
-        if len(image_files) != 8:
-            print(f"경고: '{self.temp_folder}' 폴더에 8개의 이미지가 발견되지 않았습니다. 현재 {len(image_files)}개.")
-            if len(image_files) == 0:
-                print("이미지 파일을 찾을 수 없습니다. 파일명과 경로를 확인해주세요.")
-
-
-        # 로컬에 저장된 이미지 bytes 형식으로 변환하기
-        contents = []
-        for image_file in image_files:
-            with open(image_file[-1], 'rb') as f:
-                img_bytes  = f.read()
-                contents.append(Part.from_bytes(data=img_bytes, mime_type="image/png"))
-
-        prompt = "이 8개의 씬 이미지는 하나의 이야기를 구성합니다. 각 이미지의 순서에 따라 전체적인 줄거리를 2~3줄 분량으로 작성해 주세요."
-
-        contents.insert(0,prompt)
-
-        try:
-            response = self.gemini._call_gemini_multimodal(contents)
-            return response.text
-        except Exception as e:
-            raise Exception(f"Gemini API call failed: {e}")
-
-
-
-if __name__ == "__main__":
-
-    print("이미지 업로드 및 재생성 모듈이 로드되었습니다.")
-
-    # 테스트 시나리오
-    test_scene = {
-        'scene_number': 1,
-        'visual': '테스트 장면',
-        'description': '테스트 설명',
-        'mood': '테스트 분위기'
-    }
-
-    print(f"테스트 씬 데이터: {test_scene}")

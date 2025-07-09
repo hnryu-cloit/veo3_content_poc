@@ -1,5 +1,5 @@
-import json
 import os
+import json
 from datetime import datetime
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit,
                              QPushButton, QLabel, QScrollArea, QFrame,
@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit,
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap, QTextDocument
 from conti import ImageGenerationThread, ImageUpload, ImageRegenerationThread
-
+from validator import StoryboardValidator
 
 class SceneEditWidget(QWidget):
     """개별 씬(장면) 편집을 위한 위젯"""
@@ -219,6 +219,8 @@ class StoryboardDialog(QDialog):
         self.generated_images = {}
         self.image_generation_thread = None
         self.regeneration_threads = {}
+        self.status_label = None
+        self.validator = StoryboardValidator(self)
 
         self.scene_buttons = {}  # {scene_number: {'upload': button, 'regenerate': button}}
 
@@ -240,6 +242,7 @@ class StoryboardDialog(QDialog):
         main_layout = QVBoxLayout()
 
         # 제목
+        title_section = QHBoxLayout()
         title_label = QLabel('스토리보드 생성 및 편집')
         title_font = QFont()
         title_font.setPointSize(15)
@@ -254,13 +257,57 @@ class StoryboardDialog(QDialog):
                 margin-bottom: 8px;
             }
         """)
-        main_layout.addWidget(title_label)
+        title_section.addWidget(title_label)
+        # 검증 버튼 추가
+        self.validate_button = QPushButton('검증')
+        self.validate_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #003458;
+                        color: white;
+                        padding: 8px 16px;
+                        border: none;
+                        border-radius: 1px;
+                        font-weight: bold;
+                        font-size: 12px;
+                        min-width: 60px;
+                        max-width: 80px;
+                    }
+                    QPushButton:hover {
+                        background-color: #0a0a5c;
+                    }
+                    QPushButton:disabled {
+                        background-color: #cccccc;
+                        color: #666666;
+                    }
+                """)
+        self.validate_button.clicked.connect(self.validate_storyboard)
+        self.validate_button.setEnabled(False)
+        title_section.addWidget(self.validate_button)
+
+        main_layout.addLayout(title_section)
 
         # 구분선
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(line)
+
+        # 상태 메시지 라벨 추가
+        self.status_label = QLabel('')
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #003366;
+                padding: 10px;
+                background-color: #afb5ca;
+                border-radius: 4px;
+                margin: 10px;
+            }
+        """)
+        self.status_label.hide()
+        main_layout.addWidget(self.status_label)
 
         # 단계별 화면 전환
         self.stacked_widget = QStackedWidget()
@@ -386,7 +433,7 @@ class StoryboardDialog(QDialog):
         scene_control_layout.addWidget(scene_count_label)
         self.scene_count_spin = QSpinBox()
         self.scene_count_spin.setRange(1, 16)  # 최대 16개로 제한
-        self.scene_count_spin.setValue(8)
+        self.scene_count_spin.setValue(2) ## Scene 생성 개수
         self.scene_count_spin.valueChanged.connect(self.update_scene_count)
         scene_control_layout.addWidget(self.scene_count_spin)
         scene_control_layout.addStretch()
@@ -452,8 +499,7 @@ class StoryboardDialog(QDialog):
         layout.addWidget(self.result_scroll)
 
         # 하단 버튼들
-        self.button_container = QWidget()
-        button_layout = QHBoxLayout(self.button_container)
+        button_layout = QHBoxLayout()
 
         back_edit_button = QPushButton('이전 화면으로')
         back_edit_button.clicked.connect(self.go_back_to_edit)
@@ -525,7 +571,6 @@ class StoryboardDialog(QDialog):
         """로딩 상태 표시"""
         self.loading_widget.show()
         self.result_scroll.hide()
-        self.button_container.hide()
 
         # 진행 상태 초기화
         self.completed_scenes = 0
@@ -536,7 +581,6 @@ class StoryboardDialog(QDialog):
         """로딩 상태 숨기기"""
         self.loading_widget.hide()
         self.result_scroll.show()
-        self.button_container.show()
 
     def select_storyboard(self, storyboard_key):
         """스토리보드 선택 및 편집 페이지로 이동"""
@@ -662,6 +706,9 @@ class StoryboardDialog(QDialog):
         self.is_generating = False
         self.hide_loading_state()
 
+        # 검증 버튼 활성화
+        self.validate_button.setEnabled(True)
+
         # 결과 표시
         self.display_final_results()
 
@@ -771,6 +818,10 @@ class StoryboardDialog(QDialog):
             # 재생성 중 버튼 비활성화
             self.set_scene_buttons_enabled(scene_number, False)
 
+            # 상태 메시지 표시
+            self.status_label.setText(f'Scene #{scene_number} 이미지를 재생성하고 있습니다...')
+            self.status_label.show()
+
             regen_thread = ImageRegenerationThread.regenerate_image(
                 scene_data, scene_number, parent=self
             )
@@ -791,31 +842,45 @@ class StoryboardDialog(QDialog):
                 self.regeneration_threads[scene_number] = regen_thread
                 regen_thread.start()
 
-                # 진행 상태 표시
-                QMessageBox.information(self, '재생성 시작', f'씬 #{scene_number} 이미지를 재생성하고 있습니다...')
             else:
-                # 스레드 생성 실패 시 버튼 다시 활성화
+                # 스레드 생성 실패 시 버튼 다시 활성화 및 상태 메시지 숨김
                 self.set_scene_buttons_enabled(scene_number, True)
+                self.status_label.hide()
 
         except Exception as e:
             QMessageBox.critical(self, '오류', f'이미지 재생성 중 오류가 발생했습니다: {str(e)}')
-            # 오류 발생 시에도 버튼 다시 활성화
+            # 오류 발생 시 버튼 다시 활성화 및 상태 메시지 숨김
             self.set_scene_buttons_enabled(scene_number, True)
+            self.status_label.hide()
 
     def on_regeneration_completed(self, scene_number, image_path, error_message):
         """이미지 재생성 완료 처리"""
+        # 상태 메시지 업데이트
         if error_message:
-            QMessageBox.critical(self, '재생성 실패', f'씬 #{scene_number} 이미지 재생성에 실패했습니다:\n{error_message}')
+            self.status_label.setText(f'Scene #{scene_number} 이미지 재생성에 실패했습니다: {error_message}')
+            QMessageBox.critical(self, '재생성 실패', f'Scene #{scene_number} 이미지 재생성에 실패했습니다:\n{error_message}')
         else:
+            self.status_label.setText(f'Scene #{scene_number} 이미지가 성공적으로 재생성되었습니다.')
+            QMessageBox.information(self, '재생성 완료', f'Scene #{scene_number} 이미지가 성공적으로 재생성되었습니다.')
             self.generated_images[scene_number] = image_path
-            QMessageBox.information(self, '재생성 완료', f'씬 #{scene_number} 이미지가 성공적으로 재생성되었습니다.')
-
             # 화면 새로고침
             self.display_final_results()
+
+            # 재생성 후 자동으로 재검증 제안
+            reply = QMessageBox.question(
+                self, '재검증',
+                f'Scene #{scene_number}이 재생성되었습니다.\n전체 스토리보드를 다시 검증하시겠습니까?',
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.validate_storyboard()
 
         # 완료된 스레드 정리
         if scene_number in self.regeneration_threads:
             del self.regeneration_threads[scene_number]
+
+        # 버튼 다시 활성화
+        self.set_scene_buttons_enabled(scene_number, True)
 
     def create_image_widget(self, scene_number):
         """이미지 위젯 생성"""
@@ -862,32 +927,72 @@ class StoryboardDialog(QDialog):
         total_scenes = len(self.edited_scenes)
         self.progress_label.setText(f'{self.completed_scenes} / {total_scenes}개 Scene Success!!!')
 
-    def closeEvent(self, event):
-        """다이얼로그 종료 시 스레드 정리"""
-        # 생성 중이면 확인 메시지
-        if self.is_generating:
-            reply = QMessageBox.question(
-                self,
-                '프로그램 종료',
-                '이미지 생성이 진행 중입니다.\n정말로 프로그램을 종료하시겠습니까?\n\n생성 중인 작업이 모두 취소됩니다.',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
+    def validate_storyboard(self):
+        """스토리보드 검증 실행"""
+        if not self.edited_scenes:
+            QMessageBox.warning(self, '검증 불가', '검증할 씬 데이터가 없습니다.')
+            return
 
-            if reply == QMessageBox.No:
-                event.ignore()
+        # temp 폴더에 이미지가 있는지 확인
+        temp_folder = './temp'
+        if not os.path.exists(temp_folder):
+            QMessageBox.warning(self, '검증 불가', 'temp 폴더가 존재하지 않습니다.')
+            return
+
+        # 이미지 파일 확인
+        image_files = [f for f in os.listdir(temp_folder) if f.startswith('scene_') and f.endswith('.png')]
+        if len(image_files) == 0:
+            QMessageBox.warning(self, '검증 불가', '생성된 이미지가 없습니다. 먼저 이미지를 생성해주세요.')
+            return
+
+        ## 오류
+        # self.validator.validate_storyboard(self.edited_scenes)
+
+    def regenerate_scene_with_prompt(self, scene_number, improved_prompt):
+        """개선된 프롬프트로 씬 재생성"""
+        try:
+            # 기존 재생성 로직을 개선된 프롬프트로 수정
+            scene_data = None
+            for scene in self.edited_scenes:
+                if scene['scene_number'] == scene_number:
+                    scene_data = scene.copy()
+                    break
+
+            if not scene_data:
+                QMessageBox.warning(self, '재생성 오류', f'Scene #{scene_number}를 찾을 수 없습니다.')
                 return
 
-        # 모든 스레드 정리
-        self.stop_image_generation()
+            scene_data['improved_description'] = improved_prompt
 
-        # 재생성 스레드들 정리
-        for thread in self.regeneration_threads.values():
-            if thread.isRunning():
-                thread.quit()
-                thread.wait()
+            # 재생성 중 버튼 비활성화
+            self.set_scene_buttons_enabled(scene_number, False)
 
-        event.accept()
+            # 상태 메시지 표시
+            self.status_label.setText(f'Scene #{scene_number} 이미지를 개선된 프롬프트로 재생성하고 있습니다...')
+            self.status_label.show()
+
+            # 개선된 재생성 스레드 시작
+            regen_thread = ImageRegenerationThread(scene_data, scene_number, self)
+
+            if regen_thread:
+                regen_thread.regeneration_completed.connect(
+                    lambda sn, img_path, error: self.on_regeneration_completed(sn, img_path, error)
+                )
+
+                # 기존 재생성 스레드가 있다면 정리
+                if scene_number in self.regeneration_threads:
+                    old_thread = self.regeneration_threads[scene_number]
+                    if old_thread.isRunning():
+                        old_thread.quit()
+                        old_thread.wait()
+
+                self.regeneration_threads[scene_number] = regen_thread
+                regen_thread.start()
+
+        except Exception as e:
+            QMessageBox.critical(self, '재생성 오류', f'재생성 중 오류가 발생했습니다: {str(e)}')
+            self.set_scene_buttons_enabled(scene_number, True)
+            self.status_label.hide()
 
     def create_scene_info_table(self, scene):
         """씬 정보 테이블 생성"""
@@ -1112,7 +1217,7 @@ class StoryboardDialog(QDialog):
                 min-width: 80px;
             }}
             QPushButton:hover {{
-                background-color: {color}dd;
+                background-color: {color}99;
             }}
             QPushButton:pressed {{
                 background-color: {color}bb;
@@ -1123,6 +1228,32 @@ class StoryboardDialog(QDialog):
             }}
         """
 
+    def closeEvent(self, event):
+        """다이얼로그 종료 시 스레드 정리"""
+        # 생성 중이면 확인 메시지
+        if self.is_generating:
+            reply = QMessageBox.question(
+                self,
+                '프로그램 종료',
+                '이미지 생성이 진행 중입니다.\n정말로 프로그램을 종료하시겠습니까?\n\n생성 중인 작업이 모두 취소됩니다.',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
+
+        # 모든 스레드 정리
+        self.stop_image_generation()
+
+        # 재생성 스레드들 정리
+        for thread in self.regeneration_threads.values():
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+
+        event.accept()
 
 if __name__ == "__main__":
 
@@ -1145,7 +1276,7 @@ if __name__ == "__main__":
     scenario = json_file['scenes']
     for data in scenario:
         prompt = f"""
-        아래의 정보는 스토리보드의 주요 씬(장면)에 대한 내용이야. 해당 내용 참고하여 스토리보드 스케치 이미지 만들어줘
+        아래의 정보는 스토리보드의 주요 Scene(장면)에 대한 내용이야. 해당 내용 참고하여 스토리보드 스케치 이미지 만들어줘
             **시각적 묘사**: {data['visual']},
             **음향 효과**: {data['audio']},
             **자막 또는 나레이션**: {data['text']},
