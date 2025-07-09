@@ -23,8 +23,14 @@ class ApiThread(QThread):
     def run(self):
         try:
             gemini = Gemini()
-            prompt = self.create_storyboard_prompt(self.form_data)
+            # 전체 plot 생성
+            prompt = self.create_plot_prompt(self.form_data)
             response = gemini._call_gemini_text(prompt)
+
+            # plot 기반 scene description 생성
+            prompt = self.create_storyboard_prompt(self.form_data, response)
+            response = gemini._call_gemini_text(prompt)
+            print(response)
 
             # 스트림 응답 처리
             storyboards = json.loads(response)
@@ -36,11 +42,26 @@ class ApiThread(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
-    def create_storyboard_prompt(self, data):
+    def create_plot_prompt(self, data):
         """폼 데이터를 기반으로 프롬프트 생성"""
         prompt = f"""
-        아래의 정보를 바탕으로 광고 스토리보드를 생성해주세요.
+        아래의 [제품/광고목적/타겟]에 대한 광고 콘티에 대한 plot을 2~3줄 분량으로 작성해주세요. 
         
+        제품명: {data['product_name']}
+        제품 설명: {data['product_description']}
+        콘텐츠 목적: {data['content_purpose']}
+        핵심 메시지: {data['core_message']}
+        광고 채널: {data['ad_channel']}
+        타겟 고객: {data['target_customer']}
+        톤 앤 매너: {data['tone_manner']}
+        """
+        return prompt
+
+
+    def create_storyboard_prompt(self, data, response):
+        """폼 데이터를 기반으로 프롬프트 생성"""
+        prompt = f"""
+        광고 plot: {response}
         제품명: {data['product_name']}
         제품 설명: {data['product_description']}
         콘텐츠 목적: {data['content_purpose']}
@@ -55,33 +76,19 @@ class ApiThread(QThread):
             for i, file_info in enumerate(data['reference_files'], 1):
                 prompt += f"{i}. {file_info['파일설명']}: {file_info['파일명']}\n"
 
+
         prompt += """
-            ## Role
-            - 당신은 제품 속성과 타겟 고객 을 바탕으로 광고를 기획하는 광고 기획 전문가입니다.
-    
-    
-            ## Objective
-            - 최종 목표는 하나의 storyboard 내에서 각 8개의 Scene에 대해 이미지를 생성하고 해당 이미지를 기반으로 영상을 만드는 것입니다.
-            - 여기서는 각 Scene에 대한 이미지 생성을 위해 storyboard를 작성합니다.
-    
-    
-            ## Context
-            - 생성된 광고는 입력 받은 '타겟 고객'을 대상으로 제품에 보여질 예정입니다.
-            - 입력받은 제품의 속성을 기반으로 광고에 사용될 storyboard 3개, 각 storyboard 내 scene은 8개를 생성합니다.
-            - 각 scene의 길이는 1초, storyboard의 길이는 8초임을 감안하고 스토리보트를 생성합니다.
-            - '타겟 고객' 성향을 고려하며 '톤 앤 매너'를 유지하며 스토리보드를 작성해주세요.
-            **storyboard의 각 scene의 내용이 줄거리와 톤앤매너에 상응하도록 작성해주세요.**
-    
-    
-            ## Example/Guideline
-            **출력은 다음 형식의 JSON입니다.**
-            {
-              "storyboard1": {
-                "title": "광고 제목",
-                "total duration": "전체 광고 길이",
-                "plot": "핵심소재, 타겟고객을 겨냥한 2~3줄에 대해 설명하는 줄거리",
-                "scenes": [
-                  {
+        - 위에서 입력받은 광고 plot 정보와 사용자 입력 기반으로 다음 JSON 구조에 맞춰 광고 스토리보드를 생성해 주세요.
+        - 스토리보드 전체 길이는 8초이며 스토리보드 내 8개의 scene이 존재하며 각 scene의 길이는 1초입니다.
+        ** 출력 형식 **
+        {
+          "storyboard1":{
+            "title": "광고 제목",
+            "total duration": "전체 광고 길이",
+            "plot": [광고 plot],
+            "mood": [톤 앤 매너],
+            "scenes": [
+              {
                     "scene_number": 1,
                     "duration": "씬 길이",
                     "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
@@ -110,8 +117,6 @@ class ApiThread(QThread):
                 "key_messages": ["핵심 메시지 1", "핵심 메시지 2"],
                 "call_to_action": "행동 유도 문구"
               }
-              "storyboard2": {},
-              "storyboard3": {},
             }
         """
 
