@@ -14,9 +14,6 @@ from conti import ImageGenerationThread, ImageUpload, ImageRegenerationThread  #
 
 from validator import StoryboardValidator
 
-from google.genai.types import Part
-
-
 class SceneEditWidget(QWidget):
     """개별 씬(장면) 편집을 위한 위젯"""
 
@@ -237,6 +234,7 @@ class StoryboardDialog(QDialog):
         if not os.path.exists(self.output_folder):
             os.makedirs(self.output_folder)
 
+        self.gemini = Gemini()
         self.init_ui()
 
     def init_ui(self):
@@ -932,7 +930,7 @@ class StoryboardDialog(QDialog):
         total_scenes = len(self.edited_scenes)
         self.progress_label.setText(f'{self.completed_scenes} / {total_scenes}개 Scene Success!!!')
 
-    def validate_storyboard(self, storyboards):
+    def validate_storyboard(self):
         """스토리보드 검증 실행"""
         if not self.edited_scenes:
             QMessageBox.warning(self, '검증 불가', '검증할 씬 데이터가 없습니다.')
@@ -950,68 +948,7 @@ class StoryboardDialog(QDialog):
             QMessageBox.warning(self, '검증 불가', '생성된 이미지가 없습니다. 먼저 이미지를 생성해주세요.')
             return
 
-        ## 오류
-        # self.validator.validate_storyboard(self.edited_scenes)
-
-        # 검증용 description 생성
-        validation_result = {}
-        image_files = [os.path.join(temp_folder, f) for f in image_files]
-        prompt = """
-          입력받은 scene 이미지는 광고 영상 중 일부 장면에 대한 이미지입니다.
-          이미지를 보고 해당 scene에 해당하는 설명을 한 문장으로 작성해주세요.
-          부분적인 묘사보다는 핵심 스토리에 대해 작성해주세요.
-        """
-
-        for image_file in image_files:
-            image = cv2.imread(image_file)
-            success, encoded_image = cv2.imencode('.png', image)
-            img_bytes = encoded_image.tobytes()
-            contents = [prompt, Part.from_bytes(data=img_bytes, mime_type="image/png")]
-            validation_description = self._call_gemini_multimodal(contents)
-            validation_description_json = json.loads(validation_description)["scene_description"]
-
-            scene_number = image_file.split('_')[-1].split('.')[0]
-            scene_description = next(
-                (scene["description"] for scene in storyboards["scenes"] if scene["scene_number"] == scene_number))
-
-            score_prompt = f"""
-             다음 동일 광고 scene에 대한 description에 대해 비교하려고 합니다.
-             - 원본 설명: {scene_description}
-             - 검증용 설명: {validation_description_json}
-             다음 세 가지 기준에 따라 각각 0~5점(0: 전혀 유사하지 않음, 5: 매우 유사함)으로 평가하세요.
-             1. 메시지 전달력: 광고의 핵심 메시지가 스케치에서 명확하게 시각적으로 표현되어 있는가?
-             2. 창의성 및 독창성: 스케치가 기존 광고와 차별화되는 창의적 아이디어와 표현 방식을 보여주는가?
-             3. 브랜드/제품 적합성: 스케치가 브랜드의 정체성, 제품 특성, 타깃 소비자와 잘 부합하는가?
-             세 기준의 점수를 기반으로 전체 비교 총점을 산출하고 각 항목별로  간단한 평가 이유와 개선점을 작성하세요.
-             아래의 JSON 형식으로 출력해주세요:
-
-               {{
-                    "메시지 전달력": {{
-                      "점수": 0~5, 
-                      "평가 이유": "설명", 
-                      "개선점": "설명"
-                  }},
-                    "창의성 및 독창성": {{
-                    "점수": 0~5, 
-                    "평가 이유": "설명", 
-                    "개선점": "설명"
-                  }},
-                    "브랜드/제품 적합성": {{
-                    "점수": 0~5, 
-                    "평가 이유": "설명", 
-                    "개선점": "설명"
-                  }},
-                    "총점": 0~5
-                }}
-
-            """
-
-            response = self.gemini._call_gemini_text(score_prompt)
-            print(validation_description_json)
-            print(response)
-            validation_result[scene_number] = json.loads(response)
-
-        return validation_result
+        self.validator.evaluate_storyboard(self.edited_scenes)
 
     def generate_improved_prompt(self, generate_image_prompt: str, evaluation_data: dict) -> str:
         """검증 결과 반영하여 프롬프트 개선"""
