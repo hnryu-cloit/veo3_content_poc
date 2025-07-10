@@ -1007,6 +1007,8 @@ class StoryboardDialog(QDialog):
             """
 
             response = self.gemini._call_gemini_text(score_prompt)
+            print(validation_description_json)
+            print(response)
             validation_result[scene_number] = json.loads(response)
 
         return validation_result
@@ -1340,11 +1342,7 @@ if __name__ == "__main__":
     scenario = json_file['scenes']
     for data in scenario:
         prompt = f"""
-        아래의 정보는 스토리보드의 주요 Scene(장면)에 대한 내용이야. 해당 내용 참고하여 스토리보드 스케치 이미지 만들어줘
-            **시각적 묘사**: {data['visual']},
-            **음향 효과**: {data['audio']},
-            **자막 또는 나레이션**: {data['text']},
-            **장면 묘사** : {data['description']}
+        {data['visual']}{data['description']}
         """
         try:
             sketch_image = gemini._call_imagen_text(prompt)
