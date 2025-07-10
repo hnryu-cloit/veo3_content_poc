@@ -12,7 +12,9 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap, QTextDocument
 from conti import ImageGenerationThread, ImageUpload, ImageRegenerationThread  # , ValidationTextGenerator
 
+from common.gemini import Gemini
 from validator import StoryboardValidator
+
 
 class SceneEditWidget(QWidget):
     """개별 씬(장면) 편집을 위한 위젯"""
@@ -1278,7 +1280,6 @@ if __name__ == "__main__":
     import json
     import glob
     import os
-    from common.gemini import Gemini
 
     gemini = Gemini()
     json_file = glob.glob('./output/**/*.json')[0]  ## json_path 직접 입력

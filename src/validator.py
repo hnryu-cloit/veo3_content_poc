@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QTextEdit, QGroupBox, QProgressBar, QMessageBox,
                              QHeaderView, QScrollArea, QWidget, QFrame)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtGui import QFont, QPixmap, QColor
 from common.gemini import Gemini
 from google.genai.types import Part
 
@@ -93,7 +93,7 @@ class ValidationThread(QThread):
 
             # JSON 파싱
             try:
-                result = json.loads(response.text)
+                result = json.loads(response)
                 return result.get("scene_description", "설명 추출 실패")
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 텍스트에서 추출 시도
@@ -135,6 +135,7 @@ class ValidationThread(QThread):
                     "평가 이유": "설명",
                     "개선점": "설명"
                 }},
+                "총점": 0~15
             }}
             """
 
@@ -166,9 +167,7 @@ class ValidationThread(QThread):
                 improvements_text = " | ".join(improvements) if improvements else "개선사항 없음"
 
                 # 총점 계산
-                total_score = result.get('총점', 0)
-                if total_score == 0:  # 총점이 없으면 평균 계산
-                    total_score = sum(scores.values()) / len(scores) if scores else 0
+                total_score = sum(scores.values()) / len(scores) if scores else 0
 
                 # 재생성 프롬프트 생성
                 regeneration_prompt = f"""
@@ -218,23 +217,29 @@ class ValidationThread(QThread):
             # 간단한 점수 추출 시도
             lines = response_text.split('\n')
             for line in lines:
-                if '메시지 전달력' in line and '점수' in line:
+                if '메시지 전달력' in line and any(char.isdigit() for char in line):
                     try:
-                        score = int(''.join(filter(str.isdigit, line)))
-                        scores['메시지 전달력'] = min(score, 5)
-                    except:
+                        digits = ''.join(filter(str.isdigit, line))
+                        if digits:
+                            score = int(digits[0])  # 첫 번째 숫자만 사용
+                            scores['메시지 전달력'] = min(score, 5)
+                    except (ValueError, IndexError):
                         pass
-                elif '창의성' in line and '점수' in line:
+                elif '창의성' in line and any(char.isdigit() for char in line):
                     try:
-                        score = int(''.join(filter(str.isdigit, line)))
-                        scores['창의성 및 독창성'] = min(score, 5)
-                    except:
+                        digits = ''.join(filter(str.isdigit, line))
+                        if digits:
+                            score = int(digits[0])  # 첫 번째 숫자만 사용
+                            scores['창의성 및 독창성'] = min(score, 5)
+                    except (ValueError, IndexError):
                         pass
-                elif '브랜드' in line and '점수' in line:
+                elif '브랜드' in line and any(char.isdigit() for char in line):
                     try:
-                        score = int(''.join(filter(str.isdigit, line)))
-                        scores['브랜드/제품 적합성'] = min(score, 5)
-                    except:
+                        digits = ''.join(filter(str.isdigit, line))
+                        if digits:
+                            score = int(digits[0])  # 첫 번째 숫자만 사용
+                            scores['브랜드/제품 적합성'] = min(score, 5)
+                    except (ValueError, IndexError):
                         pass
 
             total_score = sum(scores.values()) / len(scores) if scores else 0
@@ -325,14 +330,13 @@ class ValidationResultDialog(QDialog):
         summary_text = f"""
         <div style="text-align: center; font-size: 13px;">
             <p><b>전체 평균 점수: {avg_score:.1f}/5.0</b></p>
-            <p>우수 (4.0+): {excellent}Scene | 양호 (3.0+): {good}Scene | 개선 필요 (3.0미만): {poor}Scene</p>
+            <p>우수 (4.0+): {excellent} Scene | 양호 (3.0+): {good} Scene | 개선 필요 (3.0미만): {poor} Scene</p>
         </div>
         """
 
         summary_label = QLabel(summary_text)
         summary_label.setStyleSheet("""
             QLabel {
-                background-color: #f8f9fa;
                 border: 1px solid #dee2e6;
                 border-radius: 1px;
                 padding: 10px;
@@ -357,7 +361,6 @@ class ValidationResultDialog(QDialog):
         self.detail_table.setStyleSheet("""
             QTableWidget {
                 gridline-color: #dee2e6;
-                background-color: white;
             }
             QTableWidget::item {
                 padding: 8px;
@@ -366,10 +369,13 @@ class ValidationResultDialog(QDialog):
             QHeaderView::section {
                 background-color: #f8f9fa;
                 padding: 10px;
-                border: 1px solid #dee2e6;
                 font-weight: bold;
             }
         """)
+
+        # 행 높이 자동 조정을 위한 정책 설정
+        self.detail_table.setWordWrap(True)
+        self.detail_table.resizeRowsToContents()  # 내용에 맞게 행 높이 자동 조정
 
         # 테이블 데이터 채우기
         self.populate_table()
@@ -387,9 +393,22 @@ class ValidationResultDialog(QDialog):
         self.detail_table.setColumnWidth(4, 80)
         self.detail_table.setColumnWidth(7, 100)
 
+        # 행 높이 조정 - 버튼이 잘리지 않도록
+        vertical_header = self.detail_table.verticalHeader()
+        vertical_header.setDefaultSectionSize(50)  # 기본 행 높이를 50px로 설정
+        vertical_header.setMinimumSectionSize(45)  # 최소 행 높이 45px
+
         table_layout.addWidget(self.detail_table)
         table_group.setLayout(table_layout)
         layout.addWidget(table_group)
+
+        # 테이블 데이터 추가 후 행 높이 재조정
+        self.detail_table.resizeRowsToContents()
+
+        # 최소 행 높이 보장
+        for row in range(self.detail_table.rowCount()):
+            if self.detail_table.rowHeight(row) < 45:
+                self.detail_table.setRowHeight(row, 45)
 
     def populate_table(self):
         """테이블에 데이터 채우기"""
@@ -397,22 +416,27 @@ class ValidationResultDialog(QDialog):
 
         for row, result in enumerate(self.validation_results):
             # 씬 번호
-            self.detail_table.setItem(row, 0, QTableWidgetItem(f"#{result['scene_number']}"))
+            scene_item = QTableWidgetItem(f"#{result['scene_number']}")
+            scene_item.setTextAlignment(Qt.AlignCenter)
+            self.detail_table.setItem(row, 0, scene_item)
 
             # 각 점수
             scores = result['scores']
-            self.detail_table.setItem(row, 1, QTableWidgetItem(str(scores.get('메시지 전달력', 0))))
-            self.detail_table.setItem(row, 2, QTableWidgetItem(str(scores.get('창의성 및 독창성', 0))))
-            self.detail_table.setItem(row, 3, QTableWidgetItem(str(scores.get('브랜드/제품 적합성', 0))))
+            for col, key in enumerate(['메시지 전달력', '창의성 및 독창성', '브랜드/제품 적합성'], 1):
+                score_item = QTableWidgetItem(str(scores.get(key, 0)))
+                score_item.setTextAlignment(Qt.AlignCenter)
+                self.detail_table.setItem(row, col, score_item)
 
-            # 총점 (색상 적용)
-            total_item = QTableWidgetItem(str(result['total_score']))
+            # 총점
+            total_item = QTableWidgetItem(f"{result['total_score']:.1f}")
+            total_item.setTextAlignment(Qt.AlignCenter)
+            # 색상 설정 개선
             if result['total_score'] >= 4.0:
-                total_item.setBackground(Qt.green)
+                total_item.setBackground(QColor(144, 238, 144))  # 연한 녹색
             elif result['total_score'] >= 3.0:
-                total_item.setBackground(Qt.yellow)
+                total_item.setBackground(QColor(255, 255, 224))  # 연한 노란색
             else:
-                total_item.setBackground(Qt.red)
+                total_item.setBackground(QColor(255, 192, 203))  # 연한 빨간색
             self.detail_table.setItem(row, 4, total_item)
 
             # 추출된 설명
@@ -424,21 +448,30 @@ class ValidationResultDialog(QDialog):
 
             # 주요 이슈 (가장 낮은 점수의 이유)
             reasons = result['reasons']
-            min_score_key = min(scores.keys(), key=lambda k: scores[k])
-            main_issue = f"{min_score_key}: {reasons.get(min_score_key, '')}"
+            if scores:
+                min_score_key = min(scores.keys(), key=lambda k: scores[k])
+                main_issue = f"{min_score_key}: {reasons.get(min_score_key, '')}"
+            else:
+                main_issue = "평가 실패"
             main_issue_item = QTableWidgetItem(main_issue[:50] + "..." if len(main_issue) > 50 else main_issue)
             main_issue_item.setToolTip(main_issue)  # 전체 텍스트는 툴팁으로
             self.detail_table.setItem(row, 6, main_issue_item)
 
             # 재생성 버튼
-            if result['total_score'] < 4.0:  # 4점 미만인 경우만 재생성 버튼 활성화
+            if result['total_score'] < 3.0:  # 3점 미만인 경우만 재생성 버튼 활성화
                 regen_button = QPushButton('재생성')
                 regen_button.setStyleSheet(self.get_button_style('#dc3545'))
+                regen_button.setFixedHeight(35)  # 버튼 높이 고정
                 regen_button.clicked.connect(
                     lambda checked, sn=result['scene_number'], prompt=result['regeneration_prompt']:
                     self.regenerate_scene(sn, prompt)
                 )
                 self.detail_table.setCellWidget(row, 7, regen_button)
+            else:
+                no_regen_label = QLabel('재생성 불필요')
+                no_regen_label.setAlignment(Qt.AlignCenter)
+                no_regen_label.setStyleSheet("color: #28a745; font-weight: bold;")
+                self.detail_table.setCellWidget(row, 7, no_regen_label)
 
     def create_improvement_section(self, layout):
         """개선사항 섹션"""
@@ -449,8 +482,10 @@ class ValidationResultDialog(QDialog):
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
 
+        has_improvements = False
         for result in self.validation_results:
-            if result['total_score'] < 4.0:  # 개선이 필요한 씬만 표시
+            if result['total_score'] < 3.0:  # 개선이 필요한 씬만 표시
+                has_improvements = True
                 scene_frame = QFrame()
                 scene_frame.setStyleSheet("""
                     QFrame {
@@ -484,6 +519,13 @@ class ValidationResultDialog(QDialog):
 
                 scroll_layout.addWidget(scene_frame)
 
+        if not has_improvements:
+            no_improvement_label = QLabel("모든 Scene이 우수한 점수를 받았습니다!")
+            no_improvement_label.setAlignment(Qt.AlignCenter)
+            no_improvement_label.setStyleSheet("color: #28a745; font-size: 14px; padding: 20px;")
+            scroll_layout.addWidget(no_improvement_label)
+
+        scroll_layout.addStretch()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
         scroll_area.setMaximumHeight(200)
@@ -529,14 +571,21 @@ class StoryboardValidator:
     def __init__(self, parent_dialog):
         self.parent_dialog = parent_dialog
         self.temp_folder = './temp'
+        self.validation_thread = None
 
     def evaluate_storyboard(self, scenes_data):
         """스토리보드 검증 시작"""
         try:
+            if not os.path.exists(self.temp_folder):
+                QMessageBox.critical(self.parent_dialog, '오류',
+                                     f"임시 폴더 '{self.temp_folder}'가 존재하지 않습니다.")
+                return
+
             # 검증 다이얼로그 생성
             validation_dialog = QDialog(self.parent_dialog)
             validation_dialog.setWindowTitle('스토리보드 검증 중...')
             validation_dialog.setGeometry(200, 200, 400, 150)
+            validation_dialog.setWindowModality(Qt.ApplicationModal)
 
             layout = QVBoxLayout()
 
@@ -558,25 +607,31 @@ class StoryboardValidator:
             validation_dialog.show()
 
             # 검증 스레드 시작
-            validation_thread = ValidationThread(scenes_data, self.temp_folder)
+            self.validation_thread = ValidationThread(scenes_data, self.temp_folder)
 
             def on_scene_validated(scene_number, result):
                 progress_bar.setValue(progress_bar.value() + 1)
-                status_label.setText(f'Scene #{scene_number} 검증 완료')
+                total_score = result.get('total_score', 0)
+                status_label.setText(f'Scene #{scene_number} 검증 완료 (점수: {total_score:.1f}/5.0)')
 
             def on_validation_completed(results):
                 validation_dialog.close()
                 self.show_validation_results(results)
+                self.validation_thread = None
 
             def on_error(error_msg):
                 validation_dialog.close()
                 QMessageBox.critical(self.parent_dialog, '검증 오류',
                                      f'검증 중 오류가 발생했습니다:\n{error_msg}')
+                self.validation_thread = None
 
-            validation_thread.scene_validated.connect(on_scene_validated)
-            validation_thread.validation_completed.connect(on_validation_completed)
-            validation_thread.error_occurred.connect(on_error)
-            validation_thread.start()
+            self.validation_thread.scene_validated.connect(on_scene_validated)
+            self.validation_thread.validation_completed.connect(on_validation_completed)
+            self.validation_thread.error_occurred.connect(on_error)
+            self.validation_thread.finished.connect(self.validation_thread.quit)
+            self.validation_thread.finished.connect(self.validation_thread.deleteLater)
+
+            self.validation_thread.start()
 
         except Exception as e:
             QMessageBox.critical(self.parent_dialog, '검증 시작 오류',
@@ -588,7 +643,6 @@ class StoryboardValidator:
 
         # 재생성 요청 처리
         result_dialog.regenerate_requested.connect(self.handle_regeneration_request)
-
         result_dialog.exec_()
 
     def handle_regeneration_request(self, scene_number, improved_prompt):
