@@ -12,7 +12,6 @@ import os
 
 
 class ApiThread(QThread):
-
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
@@ -46,7 +45,7 @@ class ApiThread(QThread):
         """폼 데이터를 기반으로 프롬프트 생성"""
         prompt = f"""
         아래의 [제품/광고목적/타겟]에 대한 광고 콘티에 대한 plot을 2~3줄 분량으로 작성해주세요. 
-        
+
         제품명: {data['product_name']}
         제품 설명: {data['product_description']}
         콘텐츠 목적: {data['content_purpose']}
@@ -56,7 +55,6 @@ class ApiThread(QThread):
         톤 앤 매너: {data['tone_manner']}
         """
         return prompt
-
 
     def create_storyboard_prompt(self, data, response):
         """폼 데이터를 기반으로 프롬프트 생성"""
@@ -75,7 +73,6 @@ class ApiThread(QThread):
             prompt += f"참고할 파일들: "
             for i, file_info in enumerate(data['reference_files'], 1):
                 prompt += f"{i}. {file_info['파일설명']}: {file_info['파일명']}\n"
-
 
         prompt += """
         - 위에서 입력받은 광고 plot 정보와 사용자 입력 기반으로 다음 JSON 구조에 맞춰 광고 스토리보드를 생성해 주세요.
@@ -538,6 +535,7 @@ def main():
     window.show()
 
     sys.exit(app.exec_())
+
 
 if __name__ == '__main__':
     main()
