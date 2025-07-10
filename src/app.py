@@ -4,12 +4,15 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton,
                              QScrollArea, QFrame, QMessageBox, QGroupBox, QFileDialog,
                              QProgressBar, QInputDialog)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal
+from PyQt5.QtSvg import QSvgRenderer
+from PyQt5.QtGui import QIcon, QPixmap, QPainter,QFont
 from common.gemini import Gemini
+from common.prompt import AppPrompt
 from storyboard import StoryboardDialog
 import os
 
+app_prompt = AppPrompt()
 
 class ApiThread(QThread):
     finished = pyqtSignal(object)
@@ -23,11 +26,11 @@ class ApiThread(QThread):
         try:
             gemini = Gemini()
             # 전체 plot 생성
-            prompt = self.create_plot_prompt(self.form_data)
+            prompt = app_prompt.create_plot_prompt(self.form_data)
             response = gemini._call_gemini_text(prompt)
 
             # plot 기반 scene description 생성
-            prompt = self.create_storyboard_prompt(self.form_data, response)
+            prompt = app_prompt.create_storyboard_prompt(self.form_data, response)
             response = gemini._call_gemini_text(prompt)
             print(response)
 
@@ -41,94 +44,85 @@ class ApiThread(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
-    def create_plot_prompt(self, data):
-        """폼 데이터를 기반으로 프롬프트 생성"""
-        prompt = f"""
-        아래의 [제품/광고목적/타겟]에 대한 광고 콘티에 대한 plot을 2~3줄 분량으로 작성해주세요. 
-
-        제품명: {data['product_name']}
-        제품 설명: {data['product_description']}
-        콘텐츠 목적: {data['content_purpose']}
-        핵심 메시지: {data['core_message']}
-        광고 채널: {data['ad_channel']}
-        타겟 고객: {data['target_customer']}
-        톤 앤 매너: {data['tone_manner']}
-        """
-        return prompt
-
-    def create_storyboard_prompt(self, data, response):
-        """폼 데이터를 기반으로 프롬프트 생성"""
-        prompt = f"""
-        광고 plot: {response}
-        제품명: {data['product_name']}
-        제품 설명: {data['product_description']}
-        콘텐츠 목적: {data['content_purpose']}
-        핵심 메시지: {data['core_message']}
-        광고 채널: {data['ad_channel']}
-        타겟 고객: {data['target_customer']}
-        톤 앤 매너: {data['tone_manner']}
-        """
-
-        if not data['reference_files'] is None:
-            prompt += f"참고할 파일들: "
-            for i, file_info in enumerate(data['reference_files'], 1):
-                prompt += f"{i}. {file_info['파일설명']}: {file_info['파일명']}\n"
-
-        prompt += """
-        - 위에서 입력받은 광고 plot 정보와 사용자 입력 기반으로 다음 JSON 구조에 맞춰 광고 스토리보드를 생성해 주세요.
-        - 스토리보드 전체 길이는 8초이며 스토리보드 내 8개의 scene이 존재하며 각 scene의 길이는 1초입니다.
-        ** 출력 형식 **
-        {
-          "storyboard1":{
-            "title": "광고 제목",
-            "total duration": "전체 광고 길이",
-            "plot": [광고 plot],
-            "mood": [톤 앤 매너],
-            "scenes": [
-              {
-                    "scene_number": 1,
-                    "duration": "씬 길이",
-                    "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
-                    "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
-                    "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
-                    "description": "씬의 설명"
-                  },
-                  {
-                    "scene_number": 2,
-                    "duration": "씬 길이",
-                    "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
-                    "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
-                    "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
-                    "description": "씬의 설명"
-                  },
-                  ....,
-                  {
-                    "scene_number": 8,
-                    "duration": "씬 길이",
-                    "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
-                    "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
-                    "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
-                    "description": "씬의 설명"
-                  },
-                ],
-                "key_messages": ["핵심 메시지 1", "핵심 메시지 2"],
-                "call_to_action": "행동 유도 문구"
-              }
-            }
-        """
-
-        return prompt
+    # def create_plot_prompt(self, data):
+    #     """폼 데이터를 기반으로 프롬프트 생성"""
+    #     prompt = f"""
+    #     아래의 [제품/광고목적/타겟]에 대한 광고 콘티에 대한 plot을 2~3줄 분량으로 작성해주세요.
+    #
+    #     제품명: {data['product_name']}
+    #     제품 설명: {data['product_description']}
+    #     톤 앤 매너: {data['tone_manner']}
+    #     """
+    #     return prompt
+    #
+    # def create_storyboard_prompt(self, data, response):
+    #     """폼 데이터를 기반으로 프롬프트 생성"""
+    #     prompt = f"""
+    #     광고 plot: {response}
+    #     제품명: {data['product_name']}
+    #     제품 설명: {data['product_description']}
+    #     톤 앤 매너: {data['tone_manner']}
+    #     """
+    #
+    #     if not data['reference_files'] is None:
+    #         prompt += f"참고할 파일들: "
+    #         for i, file_info in enumerate(data['reference_files'], 1):
+    #             prompt += f"{i}. {file_info['파일설명']}: {file_info['파일명']}\n"
+    #
+    #     prompt += """
+    #     - 위에서 입력받은 광고 plot 정보와 사용자 입력 기반으로 다음 JSON 구조에 맞춰 광고 스토리보드를 생성해 주세요.
+    #     - 스토리보드 전체 길이는 8초이며 스토리보드 내 8개의 scene이 존재하며 각 scene의 길이는 1초입니다.
+    #     ** 출력 형식 **
+    #     {
+    #       "storyboard1":{
+    #         "title": "광고 제목",
+    #         "total duration": "전체 광고 길이",
+    #         "plot": [광고 plot],
+    #         "mood": [톤 앤 매너],
+    #         "scenes": [
+    #           {
+    #                 "scene_number": 1,
+    #                 "duration": "씬 길이",
+    #                 "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
+    #                 "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
+    #                 "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
+    #                 "description": "씬의 설명"
+    #               },
+    #               {
+    #                 "scene_number": 2,
+    #                 "duration": "씬 길이",
+    #                 "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
+    #                 "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
+    #                 "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
+    #                 "description": "씬의 설명"
+    #               },
+    #               ....,
+    #               {
+    #                 "scene_number": 8,
+    #                 "duration": "씬 길이",
+    #                 "visual": "인물 배치, 카메라 앵글, 배경 설정(실내/실외, 구체적 장소), 화면 전환 효과",
+    #                 "audio": "나레이션, 배경 음악, 효과 음악에 대한 설명(레퍼런스)",
+    #                 "text": "영상의 내용이나 대사를 담는 자막 또는 캡션",
+    #                 "description": "씬의 설명"
+    #               },
+    #             ],
+    #             "key_messages": ["핵심 메시지 1", "핵심 메시지 2"],
+    #             "call_to_action": "행동 유도 문구"
+    #           }
+    #         }
+    #     """
+    #
+    #     return prompt
 
 
 class AdContentForm(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-        self.api_thread = None
 
     def init_ui(self):
         # self.setWindowTitle('pTBWA-PoC: CLOIT - 광고 콘텐츠 생성')
-        self.setGeometry(100, 100, 500, 800)
+        self.setGeometry(100, 100, 500, 550)
 
         # 메인 레이아웃
         main_layout = QVBoxLayout()
@@ -155,6 +149,7 @@ class AdContentForm(QWidget):
 
         # 1. 제품명 및 설명
         product_group = QGroupBox('제품명 및 설명')
+        product_group.setFixedHeight(200)
         product_layout = QVBoxLayout()
 
         product_layout.addWidget(QLabel('제품명:'))
@@ -171,75 +166,77 @@ class AdContentForm(QWidget):
         product_group.setLayout(product_layout)
         scroll_layout.addWidget(product_group)
 
-        # 2. 콘텐츠 목적
-        purpose_group = QGroupBox('콘텐츠 목적')
-        purpose_layout = QVBoxLayout()
-
-        self.content_purpose = QComboBox()
-        self.content_purpose.addItems([
-            '선택하세요',
-            '신제품 출시',
-            '이벤트 안내',
-            '브랜드 스토리 공유',
-            '사용팁',
-            '제품 리뷰',
-            '기타'
-        ])
-        self.content_purpose.setEditable(True)
-        purpose_layout.addWidget(self.content_purpose)
-
-        purpose_group.setLayout(purpose_layout)
-        scroll_layout.addWidget(purpose_group)
-
-        # 3. 핵심 메시지
-        message_group = QGroupBox('핵심 메시지')
-        message_layout = QVBoxLayout()
-
-        self.core_message = QTextEdit()
-        self.core_message.setPlaceholderText('광고를 통해 전달하고자 하는 핵심 메시지를 입력하세요')
-        self.core_message.setMaximumHeight(80)
-        message_layout.addWidget(self.core_message)
-
-        message_group.setLayout(message_layout)
-        message_group.setMaximumHeight(100)
-        scroll_layout.addWidget(message_group)
-
-        # 4. 광고 채널
-        channel_group = QGroupBox('광고 채널')
-        channel_layout = QVBoxLayout()
-
-        self.ad_channel = QComboBox()
-        self.ad_channel.addItems([
-            '선택하세요',
-            '유튜브',
-            '인스타그램',
-            '페이스북',
-            'TV광고',
-            '기업 자사 홈페이지',
-            '네이버 블로그',
-            '카카오톡',
-            '기타'
-        ])
-        self.ad_channel.setEditable(True)
-        channel_layout.addWidget(self.ad_channel)
-
-        channel_group.setLayout(channel_layout)
-        scroll_layout.addWidget(channel_group)
-
-        # 5. 타겟 고객
-        target_group = QGroupBox('타겟 고객')
-        target_layout = QVBoxLayout()
-
-        self.target_customer = QTextEdit()
-        self.target_customer.setPlaceholderText('타겟 고객을 구체적으로 설명해 주세요 (연령대, 성별, 관심사 등)')
-        self.target_customer.setMaximumHeight(80)
-        target_layout.addWidget(self.target_customer)
-
-        target_group.setLayout(target_layout)
-        target_group.setMaximumHeight(100)
-        scroll_layout.addWidget(target_group)
+        ## 중간 평가 제외 항목
+        # # 2. 콘텐츠 목적
+        # purpose_group = QGroupBox('콘텐츠 목적')
+        # purpose_layout = QVBoxLayout()
+        #
+        # self.content_purpose = QComboBox()
+        # self.content_purpose.addItems([
+        #     '선택하세요',
+        #     '신제품 출시',
+        #     '이벤트 안내',
+        #     '브랜드 스토리 공유',
+        #     '사용팁',
+        #     '제품 리뷰',
+        #     '기타'
+        # ])
+        # self.content_purpose.setEditable(True)
+        # purpose_layout.addWidget(self.content_purpose)
+        #
+        # purpose_group.setLayout(purpose_layout)
+        # scroll_layout.addWidget(purpose_group)
+        #
+        # # 3. 핵심 메시지
+        # message_group = QGroupBox('핵심 메시지')
+        # message_layout = QVBoxLayout()
+        #
+        # self.core_message = QTextEdit()
+        # self.core_message.setPlaceholderText('광고를 통해 전달하고자 하는 핵심 메시지를 입력하세요')
+        # self.core_message.setMaximumHeight(80)
+        # message_layout.addWidget(self.core_message)
+        #
+        # message_group.setLayout(message_layout)
+        # message_group.setMaximumHeight(100)
+        # scroll_layout.addWidget(message_group)
+        #
+        # # 4. 광고 채널
+        # channel_group = QGroupBox('광고 채널')
+        # channel_layout = QVBoxLayout()
+        #
+        # self.ad_channel = QComboBox()
+        # self.ad_channel.addItems([
+        #     '선택하세요',
+        #     '유튜브',
+        #     '인스타그램',
+        #     '페이스북',
+        #     'TV광고',
+        #     '기업 자사 홈페이지',
+        #     '네이버 블로그',
+        #     '카카오톡',
+        #     '기타'
+        # ])
+        # self.ad_channel.setEditable(True)
+        # channel_layout.addWidget(self.ad_channel)
+        #
+        # channel_group.setLayout(channel_layout)
+        # scroll_layout.addWidget(channel_group)
+        #
+        # # 5. 타겟 고객
+        # target_group = QGroupBox('타겟 고객')
+        # target_layout = QVBoxLayout()
+        #
+        # self.target_customer = QTextEdit()
+        # self.target_customer.setPlaceholderText('타겟 고객을 구체적으로 설명해 주세요 (연령대, 성별, 관심사 등)')
+        # self.target_customer.setMaximumHeight(80)
+        # target_layout.addWidget(self.target_customer)
+        #
+        # target_group.setLayout(target_layout)
+        # target_group.setMaximumHeight(100)
+        # scroll_layout.addWidget(target_group)
 
         # 6. 톤앤매너
+
         tone_group = QGroupBox('톤앤매너')
         tone_layout = QVBoxLayout()
 
@@ -341,10 +338,10 @@ class AdContentForm(QWidget):
         """폼 초기화"""
         self.product_name.clear()
         self.product_description.clear()
-        self.content_purpose.setCurrentIndex(0)
-        self.core_message.clear()
-        self.ad_channel.setCurrentIndex(0)
-        self.target_customer.clear()
+        # self.content_purpose.setCurrentIndex(0)
+        # self.core_message.clear()
+        # self.ad_channel.setCurrentIndex(0)
+        # self.target_customer.clear()
         self.tone_manner.setCurrentIndex(0)
         # 참고용 파일들 초기화
         self.clear_reference_files()
@@ -468,12 +465,12 @@ class AdContentForm(QWidget):
             QMessageBox.warning(self, '입력 오류', '제품명을 입력해주세요.')
             return False
 
-        if self.content_purpose.currentText() == '선택하세요':
-            QMessageBox.warning(self, '입력 오류', '콘텐츠 목적을 선택해주세요.')
+        if not self.product_description.toPlainText().strip():
+            QMessageBox.warning(self, '입력 오류', '제품 설명을 입력해주세요.')
             return False
 
-        if not self.core_message.toPlainText().strip():
-            QMessageBox.warning(self, '입력 오류', '핵심 메시지를 입력해주세요.')
+        if not self.tone_manner.currentText().strip() or self.tone_manner.currentText() == "선택하세요":
+            QMessageBox.warning(self, '입력 오류', '톤 앤 매너를 선택해 주세요.')
             return False
 
         return True
@@ -488,10 +485,10 @@ class AdContentForm(QWidget):
         form_data = {
             "product_name": self.product_name.text().strip(),
             "product_description": self.product_description.toPlainText().strip(),
-            "content_purpose": self.content_purpose.currentText(),
-            "core_message": self.core_message.toPlainText().strip(),
-            "ad_channel": self.ad_channel.currentText(),
-            "target_customer": self.target_customer.toPlainText().strip(),
+            # "content_purpose": self.content_purpose.currentText(),
+            # "core_message": self.core_message.toPlainText().strip(),
+            # "ad_channel": self.ad_channel.currentText(),
+            # "target_customer": self.target_customer.toPlainText().strip(),
             "tone_manner": self.tone_manner.currentText(),
             "reference_files": self.get_all_reference_files()
         }
