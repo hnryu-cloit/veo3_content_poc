@@ -1013,6 +1013,20 @@ class StoryboardDialog(QDialog):
 
         return validation_result
 
+    def generate_improved_prompt(self, generate_image_prompt: str, evaluation_data: dict) -> str:
+        """검증 결과 반영하여 프롬프트 개선"""
+        prompt = f"""
+            기존 프롬프트: {generate_image_prompt}
+            아래는 위 프롬프트로 생성된 장면에 대한 평가 결과입니다. 제공해주신 평가 기준(메시지 전달력, 창의성 및 독창성, 브랜드/제품 적합성)을 바탕으로 프롬프트를 개선합니다.
+            - '점수'가 3점 이상인 경우는 '평가 이유'를 유지하는 방향으로 수정해주세요.
+            - '점수'가 2점 이하인 경우는 '평가 이유'와 '개선점'을 반영하여 수정해주세요. 
+            위의 요구사항을 반영하여 더 나은 scene 이미지 생성을 위한 프롬프트를 텍스트로 출력해주세요.
+          """
+
+        improved_prompt = self.gemini._call_gemini_text(prompt, self.model)
+        return improved_prompt
+
+
     def regenerate_scene_with_prompt(self, scene_number, improved_prompt):
         """개선된 프롬프트로 씬 재생성"""
         try:
@@ -1341,11 +1355,11 @@ if __name__ == "__main__":
     # Generate 8 scenes
     scenario = json_file['scenes']
     for data in scenario:
-        prompt = f"""
+        generate_image_prompt = f"""
         {data['visual']}{data['description']}
         """
         try:
-            sketch_image = gemini._call_imagen_text(prompt)
+            sketch_image = gemini._call_imagen_text(generate_image_prompt)
             temp_path = os.path.join(temp_folder, f"scene_{data['scene_number']}.png")
 
             # Display and save image
