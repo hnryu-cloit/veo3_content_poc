@@ -1,5 +1,6 @@
 import os
 import json
+import cv2
 from datetime import datetime
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit,
                              QPushButton, QLabel, QScrollArea, QFrame,
@@ -962,50 +963,51 @@ class StoryboardDialog(QDialog):
         """
 
         for image_file in image_files:
-            with open(image_file, 'rb') as f:
-                img_bytes = f.read()
-                contents = [prompt, Part.from_bytes(data=img_bytes, mime_type="image/png")]
-                validation_description = self._call_gemini_multimodal(contents)
-                validation_description = json.loads(validation_description)["scene_description"]
+            image = cv2.imread(image_file)
+            success, encoded_image = cv2.imencode('.png', image)
+            img_bytes = encoded_image.tobytes()
+            contents = [prompt, Part.from_bytes(data=img_bytes, mime_type="image/png")]
+            validation_description = self._call_gemini_multimodal(contents)
+            validation_description_json = json.loads(validation_description)["scene_description"]
 
-                scene_number = image_file.split('_')[-1].split('.')[0]
-                scene_description = next(
-                    (scene["description"] for scene in storyboards["scenes"] if scene["scene_number"] == scene_number)
+            scene_number = image_file.split('_')[-1].split('.')[0]
+            scene_description = next(
+                (scene["description"] for scene in storyboards["scenes"] if scene["scene_number"] == scene_number))
 
-                prompt = f"""
-                 다음 동일 광고 scene에 대한 description에 대해 비교하려고 합니다.
-                 - 원본 설명: {scene_description}
-                 - 검증용 설명: {validation_description}
-                 다음 세 가지 기준에 따라 각각 0~5점(0: 전혀 유사하지 않음, 5: 매우 유사함)으로 평가하세요.
-                 1. 메시지 전달력: 광고의 핵심 메시지가 스케치에서 명확하게 시각적으로 표현되어 있는가?
-                 2. 창의성 및 독창성: 스케치가 기존 광고와 차별화되는 창의적 아이디어와 표현 방식을 보여주는가?
-                 3. 브랜드/제품 적합성: 스케치가 브랜드의 정체성, 제품 특성, 타깃 소비자와 잘 부합하는가?
-                 세 기준의 점수를 기반으로 전체 비교 총점을 산출하고 각 항목별로  간단한 평가 이유와 개선점을 작성하세요.
-                 아래의 JSON 형식으로 출력해주세요:
+            score_prompt = f"""
+             다음 동일 광고 scene에 대한 description에 대해 비교하려고 합니다.
+             - 원본 설명: {scene_description}
+             - 검증용 설명: {validation_description_json}
+             다음 세 가지 기준에 따라 각각 0~5점(0: 전혀 유사하지 않음, 5: 매우 유사함)으로 평가하세요.
+             1. 메시지 전달력: 광고의 핵심 메시지가 스케치에서 명확하게 시각적으로 표현되어 있는가?
+             2. 창의성 및 독창성: 스케치가 기존 광고와 차별화되는 창의적 아이디어와 표현 방식을 보여주는가?
+             3. 브랜드/제품 적합성: 스케치가 브랜드의 정체성, 제품 특성, 타깃 소비자와 잘 부합하는가?
+             세 기준의 점수를 기반으로 전체 비교 총점을 산출하고 각 항목별로  간단한 평가 이유와 개선점을 작성하세요.
+             아래의 JSON 형식으로 출력해주세요:
 
-                   {{
-                        "메시지 전달력": {{
-                          "점수": 0~5, 
-                          "평가 이유": "설명", 
-                          "개선점": "설명"
-                      }},
-                        "창의성 및 독창성": {{
-                        "점수": 0~5, 
-                        "평가 이유": "설명", 
-                        "개선점": "설명"
-                      }},
-                        "브랜드/제품 적합성": {{
-                        "점수": 0~5, 
-                        "평가 이유": "설명", 
-                        "개선점": "설명"
-                      }},
-                        "총점": 0~5
-                    }}
+               {{
+                    "메시지 전달력": {{
+                      "점수": 0~5, 
+                      "평가 이유": "설명", 
+                      "개선점": "설명"
+                  }},
+                    "창의성 및 독창성": {{
+                    "점수": 0~5, 
+                    "평가 이유": "설명", 
+                    "개선점": "설명"
+                  }},
+                    "브랜드/제품 적합성": {{
+                    "점수": 0~5, 
+                    "평가 이유": "설명", 
+                    "개선점": "설명"
+                  }},
+                    "총점": 0~5
+                }}
 
-                """
+            """
 
-                response = gemini._call_gemini_text(prompt)
-                validation_result[scene_number] = json.loads(response)
+            response = self.gemini._call_gemini_text(score_prompt)
+            validation_result[scene_number] = json.loads(response)
 
         return validation_result
 
