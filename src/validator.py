@@ -111,12 +111,16 @@ class ValidationThread(QThread):
             score_prompt = f"""
             다음 동일 광고 scene에 대한 description에 대해 비교하려고 합니다.
             - 원본 설명: {original_description}
-            - 검증용 설명: {predicted_description}
+            - 검증용 설명: {predicted_description}\n\n
+            
+            **평가 지침**
             다음 세 가지 기준에 따라 각각 0~5점(0: 전혀 유사하지 않음, 5: 매우 유사함)으로 평가하세요.
             1. 메시지 전달력: 광고의 핵심 메시지가 스케치에서 명확하게 시각적으로 표현되어 있는가?
             2. 창의성 및 독창성: 스케치가 기존 광고와 차별화되는 창의적 아이디어와 표현 방식을 보여주는가?
             3. 브랜드/제품 적합성: 스케치가 브랜드의 정체성, 제품 특성, 타깃 소비자와 잘 부합하는가?
-            세 기준의 점수를 기반으로 전체 비교 총점을 산출하고 각 항목별로 간단한 평가 이유와 개선점을 작성하세요.
+            세 기준의 점수를 기반으로 전체 비교 총점을 산출하고 각 항목별로 간단한 평가 이유와 개선점을 작성하세요.\n\n
+            
+            **출력 형식**
             아래의 JSON 형식으로 출력해주세요:
 
             {{
@@ -271,16 +275,17 @@ class ValidationThread(QThread):
 class ValidationResultDialog(QDialog):
     """검증 결과를 표시하는 다이얼로그"""
 
-    regenerate_requested = pyqtSignal(int, str)  # scene_number, improved_prompt
+    regenerate_requested = pyqtSignal(int, dict, str)  # scene_number, scene_data, improved_prompt
 
-    def __init__(self, validation_results, parent=None):
+    def __init__(self, validation_results, scenes_data, parent=None):
         super().__init__(parent)
         self.validation_results = validation_results
+        self.scenes_data = scenes_data  # 씬 데이터 저장
         self.init_ui()
 
     def init_ui(self):
         self.setWindowTitle('스토리보드 검증 결과')
-        self.setGeometry(100, 100, 500, 900)
+        self.setGeometry(100, 100, 500, 700)
 
         layout = QVBoxLayout()
 
@@ -330,7 +335,7 @@ class ValidationResultDialog(QDialog):
         summary_text = f"""
         <div style="text-align: center; font-size: 13px;">
             <p><b>전체 평균 점수: {avg_score:.1f}/5.0</b></p>
-            <p>우수 (4.0+): {excellent} Scene | 양호 (3.0+): {good} Scene | 개선 필요 (3.0미만): {poor} Scene</p>
+            <p>우수 (4.0+): {excellent}개 | 양호 (3.0+): {good}개 | 개선 필요 (3.0미만): {poor}개</p>
         </div>
         """
 
@@ -387,11 +392,11 @@ class ValidationResultDialog(QDialog):
         header.setSectionResizeMode(6, QHeaderView.Stretch)  # 주요 이슈 컬럼
         header.setSectionResizeMode(7, QHeaderView.Fixed)
         self.detail_table.setColumnWidth(0, 50)
-        self.detail_table.setColumnWidth(1, 100)
-        self.detail_table.setColumnWidth(2, 100)
-        self.detail_table.setColumnWidth(3, 100)
-        self.detail_table.setColumnWidth(4, 80)
-        self.detail_table.setColumnWidth(7, 100)
+        self.detail_table.setColumnWidth(1, 120)
+        self.detail_table.setColumnWidth(2, 120)
+        self.detail_table.setColumnWidth(3, 120)
+        self.detail_table.setColumnWidth(4, 100)
+        self.detail_table.setColumnWidth(7, 120)
 
         # 행 높이 조정 - 버튼이 잘리지 않도록
         vertical_header = self.detail_table.verticalHeader()
@@ -489,11 +494,9 @@ class ValidationResultDialog(QDialog):
                 scene_frame = QFrame()
                 scene_frame.setStyleSheet("""
                     QFrame {
-                        background-color: #fff3cd;
-                        border: 1px solid #ffeaa7;
-                        border-radius: 5px;
-                        margin: 5px;
-                        padding: 10px;
+                        background-color: #f9f9f9;
+                        border: 1px solid #ccc;
+                        border-radius:1px;
                     }
                 """)
 
@@ -522,13 +525,13 @@ class ValidationResultDialog(QDialog):
         if not has_improvements:
             no_improvement_label = QLabel("모든 Scene이 우수한 점수를 받았습니다!")
             no_improvement_label.setAlignment(Qt.AlignCenter)
-            no_improvement_label.setStyleSheet("color: #28a745; font-size: 14px; padding: 20px;")
+            no_improvement_label.setStyleSheet("color: #28a745; font-size: 14px;")
             scroll_layout.addWidget(no_improvement_label)
 
         scroll_layout.addStretch()
         scroll_area.setWidget(scroll_widget)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(200)
+        scroll_area.setMaximumHeight(250)
 
         improvement_layout.addWidget(scroll_area)
         improvement_group.setLayout(improvement_layout)
@@ -536,17 +539,35 @@ class ValidationResultDialog(QDialog):
 
     def regenerate_scene(self, scene_number, improved_prompt):
         """씬 재생성 요청"""
-        reply = QMessageBox.question(
-            self, '이미지 재생성',
-            f'Scene #{scene_number}의 이미지를 개선된 프롬프트로 재생성하시겠습니까?',
-            QMessageBox.Yes | QMessageBox.No
-        )
+        try:
+            reply = QMessageBox.question(
+                self, '이미지 재생성',
+                f'Scene #{scene_number}의 이미지를 개선된 프롬프트로 재생성하시겠습니까?',
+                QMessageBox.Yes | QMessageBox.No
+            )
 
-        if reply == QMessageBox.Yes:
-            self.regenerate_requested.emit(scene_number, improved_prompt)
-            QMessageBox.information(self, '재생성 요청',
-                                    f'Scene #{scene_number}의 이미지 재생성을 요청했습니다.')
-            self.close()
+            if reply == QMessageBox.Yes:
+                # 해당 씬 데이터 찾기
+                scene_data = None
+                for scene in self.scenes_data:
+                    if scene.get('scene_number') == scene_number:
+                        scene_data = scene
+                        break
+
+                if scene_data is None:
+                    QMessageBox.warning(self, '오류', f'Scene #{scene_number}의 데이터를 찾을 수 없습니다.')
+                    return
+
+                # 개선 프롬프트를 씬 데이터에 추가
+                scene_data['improved_description'] = improved_prompt
+
+                self.regenerate_requested.emit(scene_number, scene_data, improved_prompt)
+                QMessageBox.information(self, '재생성 요청',
+                                        f'Scene #{scene_number}의 이미지 재생성을 요청했습니다.')
+                self.close()
+
+        except Exception as e:
+            QMessageBox.critical(self, '오류', f'재생성 요청 중 오류가 발생했습니다: {str(e)}')
 
     def get_button_style(self, color):
         """버튼 스타일 반환"""
@@ -556,7 +577,7 @@ class ValidationResultDialog(QDialog):
                 color: white;
                 padding: 8px 16px;
                 border: none;
-                border-radius: 4px;
+                border-radius: 1px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -599,7 +620,7 @@ class StoryboardValidator:
             progress_bar.setValue(0)
             layout.addWidget(progress_bar)
 
-            status_label = QLabel('검증 준비 중...')
+            status_label = QLabel('검증 준비 중....')
             status_label.setAlignment(Qt.AlignCenter)
             layout.addWidget(status_label)
 
@@ -616,7 +637,7 @@ class StoryboardValidator:
 
             def on_validation_completed(results):
                 validation_dialog.close()
-                self.show_validation_results(results)
+                self.show_validation_results(results, scenes_data)
                 self.validation_thread = None
 
             def on_error(error_msg):
@@ -637,119 +658,21 @@ class StoryboardValidator:
             QMessageBox.critical(self.parent_dialog, '검증 시작 오류',
                                  f'검증을 시작할 수 없습니다:\n{str(e)}')
 
-    def show_validation_results(self, validation_results):
+    def show_validation_results(self, validation_results, scenes_data):
         """검증 결과 표시"""
-        result_dialog = ValidationResultDialog(validation_results, self.parent_dialog)
+        result_dialog = ValidationResultDialog(validation_results, scenes_data, self.parent_dialog)
 
         # 재생성 요청 처리
         result_dialog.regenerate_requested.connect(self.handle_regeneration_request)
         result_dialog.exec_()
 
-    def handle_regeneration_request(self, scene_number, improved_prompt):
+    def handle_regeneration_request(self, scene_number, scene_data, improved_prompt):
         """재생성 요청 처리"""
-        # 부모 다이얼로그의 재생성 메서드 호출
-        if hasattr(self.parent_dialog, 'regenerate_scene_with_prompt'):
-            self.parent_dialog.regenerate_scene_with_prompt(scene_number, improved_prompt)
-        else:
-            QMessageBox.information(self.parent_dialog, '알림', '재생성 기능이 아직 구현되지 않았습니다.')
-
-
-# ## 줄거리 plot
-# class PlotGenerator:
-#     """각 씬에 대한 이미지로부터 검증용 줄거리 생성"""
-#
-#     def __init__(self):
-#         from common.gemini import Gemini
-#         self.gemini = Gemini()
-#         self.temp_folder = './temp'
-#
-#     def run(self):
-#         """이미지들로부터 전체 줄거리 생성"""
-#         image_files = []
-#
-#         # temp 폴더에서 scene_ 이미지 파일들 찾기
-#         if not os.path.exists(self.temp_folder):
-#             raise Exception(f"temp 폴더 '{self.temp_folder}'가 존재하지 않습니다.")
-#
-#         for f_name in os.listdir(self.temp_folder):
-#             if f_name.startswith('scene_') and f_name.endswith('.png'):
-#                 try:
-#                     # 파일명에서 숫자 부분 추출 (예: scene_1.png -> 1)
-#                     suffix_part = f_name.split('_')[-1].split('.')[0]
-#                     image_number = int(suffix_part)
-#                     image_files.append((image_number, os.path.join(self.temp_folder, f_name)))
-#                 except ValueError:
-#                     continue  # 숫자가 아닌 경우 건너뛰기
-#
-#         # 파일명 접미사 번호순으로 정렬
-#         image_files.sort(key=lambda x: x[0])
-#
-#         if len(image_files) == 0:
-#             raise Exception("이미지 파일을 찾을 수 없습니다. 파일명과 경로를 확인해주세요.")
-#
-#         if len(image_files) != 8:
-#             print(f"경고: '{self.temp_folder}' 폴더에 8개의 이미지가 발견되지 않았습니다. 현재 {len(image_files)}개.")
-#
-#         # 로컬에 저장된 이미지 bytes 형식으로 변환하기
-#         contents = []
-#         for image_file in image_files:
-#             try:
-#                 with open(image_file[1], 'rb') as f:
-#                     img_bytes = f.read()
-#                     from google.genai.types import Part
-#                     contents.append(Part.from_bytes(data=img_bytes, mime_type="image/png"))
-#             except Exception as e:
-#                 print(f"이미지 로드 실패 {image_file[1]}: {e}")
-#                 continue
-#
-#         if not contents:
-#             raise Exception("유효한 이미지를 로드할 수 없습니다.")
-#
-#         # 줄거리 생성 프롬프트
-#         prompt = """
-#         이 이미지들은 하나의 광고 스토리보드를 구성하는 연속된 씬들입니다.
-#         각 이미지의 순서에 따라 전체적인 줄거리를 2~3줄 분량으로 작성해 주세요.
-#
-#         다음 요소들을 포함해서 작성해주세요:
-#         1. 광고의 주요 메시지나 컨셉
-#         2. 씬들 간의 연결성과 흐름
-#         3. 타겟 고객에게 전달하려는 핵심 내용
-#
-#         형식: 간결하고 명확한 2-3문장으로 작성
-#         """
-#
-#         contents.insert(0, prompt)
-#
-#         try:
-#             response = self.gemini._call_gemini_multimodal(contents)
-#             return response.text
-#         except Exception as e:
-#             raise Exception(f"Gemini API 호출 실패: {e}")
-#
-#     def generate_scene_description(self, image_path):
-#         """개별 씬 이미지에 대한 설명 생성"""
-#         try:
-#             with open(image_path, 'rb') as f:
-#                 img_bytes = f.read()
-#                 from google.genai.types import Part
-#                 image_part = Part.from_bytes(data=img_bytes, mime_type="image/png")
-#
-#             prompt = """
-#             이 이미지는 광고 스토리보드의 한 씬입니다.
-#             다음 관점에서 이미지를 분석하고 설명해주세요:
-#
-#             1. 화면 구성: 인물, 배경, 소품 등의 배치
-#             2. 시각적 요소: 색감, 조명, 분위기
-#             3. 전달되는 메시지: 이 씬이 전달하고자 하는 내용
-#             4. 광고 효과: 광고 목적에 어떻게 기여하는지
-#
-#             간결하고 구체적으로 작성해주세요.
-#             """
-#
-#             contents = [prompt, image_part]
-#             response = self.gemini._call_gemini_multimodal(contents)
-#             return response.text
-#
-#         except Exception as e:
-#             return f"이미지 분석 실패: {str(e)}"
-#
+        try:
+            # 부모 다이얼로그의 재생성 메서드 호출
+            if hasattr(self.parent_dialog, 'regenerate_scene_with_prompt'):
+                self.parent_dialog.regenerate_scene_with_prompt(scene_number, improved_prompt)
+            else:
+                QMessageBox.information(self.parent_dialog, '알림', '재생성 기능이 아직 구현되지 않았습니다.')
+        except Exception as e:
+            QMessageBox.critical(self.parent_dialog, '재생성 오류', f'재생성 중 오류가 발생했습니다: {str(e)}')

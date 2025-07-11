@@ -4,7 +4,9 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from PIL import Image
 from common.gemini import Gemini
+from common.prompt import StoryPrompt
 
+storyPrompt = StoryPrompt()
 
 
 class ImageGenerationThread(QThread):
@@ -54,35 +56,18 @@ class ImageGenerationThread(QThread):
 
     def create_scene_image_prompt(self, scene):
         """씬 정보를 바탕으로 이미지 생성 프롬프트 생성"""
-        prompt_parts = []
-
-        if scene.get('plot'):
-            prompt_parts.append(f"전체 줄거리: {scene['plot']}")
-        if scene.get('visual'):
-            prompt_parts.append(f"시각적 묘사: {scene['visual']}")
-        if scene.get('description'):
-            prompt_parts.append(f"장면 묘사: {scene['description']}")
-        if scene.get('mood'):
-            prompt_parts.append(f"분위기: {scene['mood']}")
-        if scene.get('audio'):
-            prompt_parts.append(f"음향 효과: {scene['audio']}")
-        if scene.get('text'):
-            prompt_parts.append(f"자막/나레이션: {scene['text']}")
-
-        base_prompt = "아래의 정보를 참고 하여 스토리보드 스케치 이미지를 만들어줘. "
-        full_prompt = base_prompt + " | ".join(prompt_parts)
-
-        return full_prompt
+        return storyPrompt.image_prompt(scene)
 
 
 class ImageRegenerationThread(QThread):
     """이미지 재생성 스레드"""
     regeneration_completed = pyqtSignal(int, object, str)
 
-    def __init__(self, scene_data, scene_number):
+    def __init__(self, scene_data, scene_number, improved_prompt=None):
         super().__init__()
         self.scene_data = scene_data
         self.scene_number = scene_number
+        self.improved_prompt = improved_prompt
         self.temp_folder = './temp'
 
         # Gemini 초기화
@@ -103,16 +88,12 @@ class ImageRegenerationThread(QThread):
             if os.path.exists(existing_file):
                 os.remove(existing_file)
 
-            # # 개선된 프롬프트 사용
-            # if 'improved_description' in self.scene_data:
-            #     prompt = self.create_improved_prompt(self.scene_data)
-            #     generated_image = self.gemini._call_imagen_text(prompt)
-            #
-            #     new_image_path = os.path.join(self.temp_folder, f"scene_{self.scene_number}.png")
-            #     generated_image.save(new_image_path, 'PNG')
-            #
-            # else:
-            new_image_path = self.regenerate_scene_image()
+            # 개선된 프롬프트가 있는 경우 사용
+            if self.improved_prompt and 'improved_description' in self.scene_data:
+                new_image_path = self.regenerate_with_improved_prompt()
+            else:
+                new_image_path = self.regenerate_scene_image()
+
             self.regeneration_completed.emit(self.scene_number, new_image_path, "")
 
         except Exception as e:
@@ -120,6 +101,35 @@ class ImageRegenerationThread(QThread):
         finally:
             import gc
             gc.collect()
+
+    def regenerate_with_improved_prompt(self):
+        """개선된 프롬프트로 이미지 재생성"""
+        # 개선된 설명을 사용한 프롬프트 생성
+        improved_description = self.scene_data.get('improved_description', '')
+
+        # 기본 씬 정보와 개선된 설명을 결합
+        enhanced_scene_data = self.scene_data.copy()
+        enhanced_scene_data['description'] = improved_description
+
+        prompt = self.create_enhanced_prompt(enhanced_scene_data)
+        temp_path = os.path.join(self.temp_folder, f"scene_{self.scene_number}.png")
+
+        try:
+            if self.gemini:
+                sketch_image = self.gemini._call_imagen_text(prompt)
+                sketch_image.save(temp_path, 'PNG')
+            else:
+                # 더미 이미지 생성 (테스트용) - 개선된 버전임을 나타내는 색상
+                import random
+                improved_colors = ['lightsteelblue', 'lightseagreen', 'lightsalmon', 'lightgoldenrodyellow',
+                                   'lightpink']
+                dummy_image = Image.new('RGB', (512, 512), color=random.choice(improved_colors))
+                dummy_image.save(temp_path, 'PNG')
+
+            return temp_path
+
+        except Exception as e:
+            raise Exception(f"이미지 재생성 실패: {str(e)}")
 
     def regenerate_scene_image(self):
         """씬 이미지 재생성"""
@@ -143,74 +153,109 @@ class ImageRegenerationThread(QThread):
         except Exception as e:
             raise Exception(f"이미지 재생성 실패: {str(e)}")
 
+    def create_enhanced_prompt(self, enhanced_scene_data):
+        """개선된 씬 데이터로 프롬프트 생성"""
+        try:
+            # StoryPrompt를 사용하여 기본 프롬프트 생성
+            base_prompt = storyPrompt.image_prompt(enhanced_scene_data)
+
+            # 개선 지시사항 추가
+            enhancement_instructions = """
+
+            추가 개선 지시사항:
+            - 더욱 선명하고 고품질의 이미지로 생성
+            - 광고의 핵심 메시지가 명확히 드러나도록 구성
+            - 브랜드 정체성과 제품 특성을 잘 반영
+            - 창의적이고 독창적인 시각적 표현 사용
+            - 전문적이고 임팩트 있는 광고 이미지 스타일
+            """
+
+            return base_prompt + enhancement_instructions
+
+        except Exception as e:
+            # StoryPrompt 사용에 실패한 경우 기본 프롬프트 생성
+            return self.create_fallback_prompt(enhanced_scene_data)
+
     def create_regeneration_prompt(self):
-        """재생성을 위한 프롬프트 생성 (기존보다 더 자세한 설명 추가)"""
-        prompt_parts = []
+        """기본 재생성 프롬프트 생성"""
+        try:
+            # StoryPrompt를 사용하여 기본 프롬프트 생성
+            base_prompt = storyPrompt.image_prompt(self.scene_data)
 
-        # 기본 스토리보드 지시문
-        base_instruction = "아래의 정보를 참고하여 상세하고 개선된 스토리보드 스케치 이미지를 다시 생성해줘. 이전보다 더 생동감 있고 표현력이 풍부하게:"
+            # 재생성 지시사항 추가
+            regeneration_instructions = """
 
-        if self.scene_data.get('visual'):
-            prompt_parts.append(f"시각적 묘사: {self.scene_data['visual']}")
-        if self.scene_data.get('description'):
-            prompt_parts.append(f"장면 묘사: {self.scene_data['description']}")
-        if self.scene_data.get('mood'):
-            prompt_parts.append(f"분위기: {self.scene_data['mood']}")
-        if self.scene_data.get('audio'):
-            prompt_parts.append(f"음향 효과: {self.scene_data['audio']}")
-        if self.scene_data.get('text'):
-            prompt_parts.append(f"자막/나레이션: {self.scene_data['text']}")
+            재생성 지시사항:
+            - 이전 버전보다 더 나은 품질로 생성
+            - 광고 목적에 더 적합하도록 개선
+            - 시각적 임팩트 강화
+            """
 
-        # 추가 개선 지시문
-        enhancement_instruction = "더욱 선명하고 감정적으로 표현력이 뛰어난 이미지로 만들어줘."
+            return base_prompt + regeneration_instructions
 
-        full_prompt = f"{base_instruction} {' | '.join(prompt_parts)} {enhancement_instruction}"
+        except Exception as e:
+            # StoryPrompt 사용에 실패한 경우 기본 프롬프트 생성
+            return self.create_fallback_prompt(self.scene_data)
 
-        return full_prompt
+    def create_fallback_prompt(self, scene_data):
+        """StoryPrompt 사용 실패 시 대체 프롬프트 생성"""
+        description = scene_data.get('description', '')
+        visual = scene_data.get('visual', '')
+        mood = scene_data.get('mood', '')
 
-    def create_improved_prompt(self, scene_data):
+        prompt = f"""
+        광고 스토리보드용 고품질 이미지를 생성해주세요.
 
-        base_prompt = scene_data.get('improved_description', '')
+        장면 설명: {description}
+        시각적 요소: {visual}
+        분위기: {mood}
 
-        original_info = f"""
-            원본 씬 정보 참고:
-            - 화면 내용: {scene_data.get('visual', '')}
-            - 분위기: {scene_data.get('mood', '')}
-            - 씬 설명: {scene_data.get('description', '')}
+        스타일: 전문적인 광고 이미지, 고화질, 선명함
         """
-
-        # 광고 스토리보드 스타일 가이드 추가
-        style_guide = """
-        스타일 가이드:
-        - 광고용 고품질 이미지
-        - 선명하고 전문적인 구성
-        - 브랜드 이미지에 적합한 톤
-        - 시각적 임팩트가 강한 구도
-        """
-        prompt = f"{base_prompt}\n\n{original_info}\n\n{style_guide}"
 
         return prompt
 
-
     @staticmethod
-    def regenerate_image(scene_data, scene_number, parent=None):
-        """이미지 재생성 시작 (정적 메서드)"""
+    def regenerate_image(scene_data, scene_number, parent=None, improved_prompt=None):
+        """이미지 재생성 시작"""
         # 재생성 확인 메시지
         from PyQt5.QtWidgets import QMessageBox
+
+        message = f'Scene #{scene_number}의 이미지를 다시 생성하시겠습니까?\n기존 이미지는 덮어씌워집니다.'
+        if improved_prompt:
+            message += '\n\n개선된 프롬프트가 적용됩니다.'
+
         reply = QMessageBox.question(
             parent,
             '이미지 재생성',
-            f'Scene #{scene_number}의 이미지를 다시 생성하시겠습니까?\n기존 이미지는 덮어씌워집니다.',
+            message,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
             # 재생성 스레드 시작
-            regen_thread = ImageRegenerationThread(scene_data, scene_number)
+            regen_thread = ImageRegenerationThread(scene_data, scene_number, improved_prompt)
             return regen_thread
 
         return None
+
+    @staticmethod
+    def regenerate_with_improved_prompt(scene_data, scene_number, improved_prompt, parent=None):
+        """개선된 프롬프트로 이미지 재생성"""
+        try:
+            # 씬 데이터에 개선된 설명 추가
+            enhanced_scene_data = scene_data.copy()
+            enhanced_scene_data['improved_description'] = improved_prompt
+
+            # 재생성 스레드 생성
+            regen_thread = ImageRegenerationThread(enhanced_scene_data, scene_number, improved_prompt)
+            return regen_thread
+
+        except Exception as e:
+            if parent:
+                QMessageBox.critical(parent, '오류', f'재생성 준비 중 오류가 발생했습니다: {str(e)}')
+            return None
 
 
 class ImageUpload:
@@ -303,7 +348,3 @@ class ImageUpload:
             return None, copy_message
 
         return temp_path, copy_message
-
-
-
-

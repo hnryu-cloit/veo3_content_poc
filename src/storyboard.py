@@ -990,7 +990,7 @@ class StoryboardDialog(QDialog):
             self.status_label.show()
 
             # 개선된 재생성 스레드 시작
-            regen_thread = ImageRegenerationThread(scene_data, scene_number, self)
+            regen_thread = ImageRegenerationThread(scene_data, scene_number, improved_prompt)
 
             if regen_thread:
                 regen_thread.regeneration_completed.connect(
